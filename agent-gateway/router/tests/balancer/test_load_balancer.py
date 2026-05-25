@@ -4,6 +4,7 @@ from router.src.balancer.circuit_breaker import CircuitBreaker, CircuitState
 from router.src.balancer.load_balancer import LoadBalancer, NoHealthyReplica
 from router.src.balancer.models import Replica, ReplicaStatus
 from router.src.balancer.slow_start import SlowStart
+from router.src.balancer.strategies.chwbl import CHWBL
 from router.src.balancer.strategies.round_robin import RoundRobin
 
 
@@ -74,6 +75,50 @@ def test_pick_raises_when_no_healthy_replica():
     )
     with pytest.raises(NoHealthyReplica):
         lb.pick()
+
+
+def test_routing_key_reaches_strategy_on_both_pick_and_repick():
+    """Regression for T2: slow-start re-pick previously called strategy.pick
+    without routing_key, silently degrading CHWBL to least-connections. This
+    test uses a spy strategy to assert routing_key flows through both the
+    initial pick and the slow-start re-pick branches."""
+    seen_keys: list[str | None] = []
+
+    class _SpyStrategy:
+        name = "spy"
+
+        def pick(self, candidates, routing_key=None):
+            seen_keys.append(routing_key)
+            return candidates[0]
+
+    # Mid-ramp so re-pick fires deterministically (weight ~0.17 < 1).
+    now = time.monotonic()
+    replicas = [
+        Replica(id=n, agent_name="t", container_name=n,
+                addr=f"http://{n}:5000", status=ReplicaStatus.SERVING,
+                joined_at=now - 5)
+        for n in ("a", "b")
+    ]
+    cbs = {r.container_name: CircuitBreaker() for r in replicas}
+    lb = LoadBalancer(
+        agent_name="t", registry=_FakeReg(replicas),
+        strategy=_SpyStrategy(), breakers=cbs,
+        slow_start=SlowStart(window_seconds=30.0),
+    )
+    for _ in range(50):
+        lb.pick(routing_key="session-stable")
+    # Some calls produce 1 pick (weight check skipped), some produce 2 (re-pick fired).
+    # Every recorded call must carry the routing_key.
+    assert seen_keys, "spy strategy was never invoked"
+    assert all(k == "session-stable" for k in seen_keys), (
+        f"routing_key dropped on some pick path; saw {set(seen_keys)}"
+    )
+    # And the re-pick branch was actually exercised (more than one strategy
+    # call per pick on at least some iterations).
+    assert len(seen_keys) > 50, (
+        f"slow-start re-pick never fired (recorded {len(seen_keys)} calls "
+        f"for 50 picks); test premise is wrong"
+    )
 
 
 def test_set_strategy_hot_swaps():
