@@ -3,6 +3,7 @@ from .circuit_breaker import CircuitBreaker
 from .models import Replica, ReplicaStatus
 from .slow_start import SlowStart
 from .strategies.base import Strategy
+from .strategies.chwbl import CHWBL
 from .strategies.least_connections import LeastConnections
 from .strategies.p2c import P2C
 from .strategies.random_strategy import Random
@@ -22,6 +23,8 @@ def _build(name: str, slow_start: SlowStart) -> Strategy:
         return LeastConnections(slow_start)
     if name == "p2c":
         return P2C(slow_start)
+    if name == "chwbl":
+        return CHWBL(c=1.25, virtual_nodes=128)
     raise ValueError(f"unknown strategy: {name}")
 
 
@@ -50,7 +53,7 @@ class LoadBalancer:
     def set_strategy(self, name: str) -> None:
         self._strategy = _build(name, self._slow_start)
 
-    def pick(self) -> Replica:
+    def pick(self, routing_key: str | None = None) -> Replica:
         replicas = self._registry.replicas_for(self.agent_name)
         candidates = [
             r for r in replicas
@@ -59,7 +62,12 @@ class LoadBalancer:
         ]
         if not candidates:
             raise NoHealthyReplica(f"no healthy replicas for {self.agent_name}")
-        picked = self._strategy.pick(candidates)
+        # Strategies that accept a routing_key (currently CHWBL) get one;
+        # others use the (candidates,) signature unchanged.
+        try:
+            picked = self._strategy.pick(candidates, routing_key=routing_key)
+        except TypeError:
+            picked = self._strategy.pick(candidates)
         # Slow-start re-pick: makes "watch the ramp" demo visible regardless of
         # active strategy. A replica at weight=0.2 gets re-picked with P=0.8.
         if len(candidates) > 1:
