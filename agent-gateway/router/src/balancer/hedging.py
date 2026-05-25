@@ -24,10 +24,16 @@ class LatencyTracker:
         self._samples.append(seconds)
 
     def p95_seconds(self) -> float:
+        """
+        Returns the latency value at the 95th percentile (tail-aware).
+        For hedging we want the point where the slow tail begins, so we
+        use ceil-style indexing: int(N * 0.95) picks the first sample
+        of the top 5%.
+        """
         if len(self._samples) < 20:
             return 1.0  # safe default during warmup
         s = sorted(self._samples)
-        idx = max(0, int(len(s) * 0.95) - 1)
+        idx = min(len(s) - 1, int(len(s) * 0.95))
         return s[idx]
 
 
