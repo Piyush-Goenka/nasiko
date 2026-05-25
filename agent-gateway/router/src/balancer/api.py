@@ -1,6 +1,7 @@
 import json
+from pathlib import Path
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from sse_starlette.sse import EventSourceResponse
 
@@ -94,5 +95,14 @@ def build_router(registry, events: EventBroker) -> APIRouter:
     @router.get("/metrics")
     def prometheus():
         return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
+
+    @router.get("/dashboard", include_in_schema=False)
+    def dashboard():
+        """Standalone single-file dashboard. Opens in any browser; uses the
+        same balancer API (no build step)."""
+        path = Path(__file__).parent / "dashboard.html"
+        if not path.exists():
+            raise HTTPException(404, "dashboard.html not bundled")
+        return FileResponse(path, media_type="text/html")
 
     return router
