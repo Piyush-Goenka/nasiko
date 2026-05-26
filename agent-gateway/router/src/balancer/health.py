@@ -59,6 +59,11 @@ class HealthChecker:
         while True:
             if stop_after is not None and time.monotonic() - start >= stop_after:
                 return
+            # Self-exit if the registry marked the replica gone. Belt-and-braces
+            # with the explicit task cancel in main.py: covers any path where
+            # the replica is removed but the spawning task wasn't tracked.
+            if replica.status is ReplicaStatus.TERMINATED:
+                return
             ok = await self._probe_once(replica)
             breaker = self._breakers.get(replica.container_name)
             if ok:

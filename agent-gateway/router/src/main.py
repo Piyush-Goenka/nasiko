@@ -157,6 +157,10 @@ async def _balancer_startup():
     )
 
     seen_agents: set[str] = set()
+    # Track probe tasks per replica so we can cancel them on removal. Without
+    # this, every terminated replica leaves a coroutine pinging a dead address
+    # every 5s forever (memory + breaker noise + event spam).
+    probe_tasks: dict[str, asyncio.Task] = {}
 
     def on_change(kind: str, r):
         if kind == "added":
@@ -177,8 +181,12 @@ async def _balancer_startup():
                     _balancer_breakers, _balancer_slow_start,
                 )
                 set_balancer_for(r.agent_name, lb)
-            asyncio.create_task(_balancer_health.run_probe(r))
+            task = asyncio.create_task(_balancer_health.run_probe(r))
+            probe_tasks[r.container_name] = task
         elif kind == "removed":
+            task = probe_tasks.pop(r.container_name, None)
+            if task is not None and not task.done():
+                task.cancel()
             _balancer_events.emit(Event(
                 ts=time.time(), type="replica_terminated",
                 pool=r.agent_name, instance_id=r.container_name,
