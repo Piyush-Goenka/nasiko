@@ -6,7 +6,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from sse_starlette.sse import EventSourceResponse
 
 from .events import EventBroker
-from .metrics import REGISTRY, fairness_gini, gini
+from .metrics import REGISTRY, fairness_gini, gini, request_counter
 from .runtime import all_balancers, get_balancer_for
 
 
@@ -52,7 +52,12 @@ def build_router(registry, events: EventBroker) -> APIRouter:
         out = []
         for name, lb in all_balancers().items():
             replicas = registry.replicas_for(name)
-            counts = [r.inflight for r in replicas]
+            # Use a 60-second rolling request count, not instantaneous inflight,
+            # so the fairness number reflects historical distribution instead of
+            # collapsing to 0 between bursts.
+            counts = request_counter.counts_for(
+                name, [r.container_name for r in replicas]
+            )
             g = gini(counts)
             fairness_gini.labels(name).set(g)
             out.append({

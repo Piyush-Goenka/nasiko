@@ -1,4 +1,7 @@
 import math
+import time
+from collections import deque
+from threading import Lock
 from prometheus_client import Counter, Gauge, Histogram, CollectorRegistry
 
 REGISTRY = CollectorRegistry()
@@ -59,16 +62,80 @@ def gini(values: list[float]) -> float:
       0 = perfect equality (every replica got the same)
       1 = total concentration (one replica got everything)
 
-    O(N^2) by definition; fine for pool sizes <= 100.
+    Closed form: after sorting ascending, G = Sum((2i - N - 1) * x_i) / (N * Sum(x))
+    for i in [1..N]. O(N log N), matches the naive O(N^2) double-sum to floating
+    point tolerance. Worth it at N >= ~50 replicas.
     """
     if not values:
         return 0.0
     n = len(values)
-    s = sum(values)
-    if s == 0:
+    total = sum(values)
+    if total == 0:
         return 0.0
-    diffs = sum(abs(a - b) for a in values for b in values)
-    return diffs / (2 * n * n * (s / n))
+    sorted_vals = sorted(values)
+    cumulative = 0.0
+    for i, v in enumerate(sorted_vals, start=1):
+        cumulative += (2 * i - n - 1) * v
+    return cumulative / (n * total)
+
+
+class RequestCounter:
+    """
+    Per-replica rolling 60-second request count, suitable as the x_i input to
+    the Gini fairness metric.
+
+    Why this is needed: the dashboard's "hero" metric is fairness across
+    replicas. Reading `r.inflight` (instantaneous in-flight count) collapses to
+    zero whenever the cluster is between bursts, which hides the very
+    imbalance the operator is trying to spot. A 60-second window keeps
+    historical pressure visible without growing unbounded.
+
+    Thread-safety: dispatch happens on asyncio (single thread), but Prometheus
+    scrape happens on a worker thread, so reads must be locked.
+    """
+
+    def __init__(self, window_seconds: float = 60.0):
+        self._window = window_seconds
+        self._events: dict[tuple[str, str], deque[float]] = {}
+        self._lock = Lock()
+
+    def record(self, pool: str, instance_id: str, now: float | None = None) -> None:
+        ts = time.monotonic() if now is None else now
+        key = (pool, instance_id)
+        with self._lock:
+            q = self._events.get(key)
+            if q is None:
+                q = deque()
+                self._events[key] = q
+            q.append(ts)
+            cutoff = ts - self._window
+            while q and q[0] < cutoff:
+                q.popleft()
+
+    def counts_for(self, pool: str, instance_ids: list[str],
+                   now: float | None = None) -> list[int]:
+        ts = time.monotonic() if now is None else now
+        cutoff = ts - self._window
+        out: list[int] = []
+        with self._lock:
+            for inst in instance_ids:
+                q = self._events.get((pool, inst))
+                if q is None:
+                    out.append(0)
+                    continue
+                while q and q[0] < cutoff:
+                    q.popleft()
+                out.append(len(q))
+        return out
+
+    def reset(self) -> None:
+        with self._lock:
+            self._events.clear()
+
+
+# Module-level singleton: agent_client records on every routed request;
+# api.py reads counts when computing the dashboard Gini gauge.
+request_counter = RequestCounter(window_seconds=60.0)
 
 
 def coefficient_of_variation(values: list[float]) -> float:
