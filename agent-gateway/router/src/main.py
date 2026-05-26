@@ -228,6 +228,7 @@ class _LazyRegistryProxy:
 app.include_router(build_balancer_router(
     registry=_LazyRegistryProxy(),
     events=_balancer_events,
+    breakers=_balancer_breakers,
 ))
 
 

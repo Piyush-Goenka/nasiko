@@ -6,11 +6,11 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from sse_starlette.sse import EventSourceResponse
 
 from .events import EventBroker
-from .metrics import REGISTRY, fairness_gini, gini, request_counter
+from .metrics import REGISTRY, fairness_gini, gini, publish_pool_gauges, request_counter
 from .runtime import all_balancers, get_balancer_for
 
 
-def build_router(registry, events: EventBroker) -> APIRouter:
+def build_router(registry, events: EventBroker, breakers: dict | None = None) -> APIRouter:
     """
     FastAPI router exposing the balancer dashboard surface.
 
@@ -60,6 +60,8 @@ def build_router(registry, events: EventBroker) -> APIRouter:
             )
             g = gini(counts)
             fairness_gini.labels(name).set(g)
+            if breakers is not None:
+                publish_pool_gauges(name, replicas, breakers, lb.strategy_name)
             out.append({
                 "agent_name": name,
                 "strategy": lb.strategy_name,
@@ -81,6 +83,12 @@ def build_router(registry, events: EventBroker) -> APIRouter:
             lb.set_strategy(strategy)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        # Push the strategy gauge right away so the dashboard reflects the
+        # swap without waiting for the next /pools poll.
+        if breakers is not None:
+            publish_pool_gauges(
+                agent_name, registry.replicas_for(agent_name), breakers, strategy,
+            )
         return {"agent_name": agent_name, "strategy": strategy}
 
     @router.get("/events")

@@ -44,6 +44,47 @@ route_decision_us = Histogram(
 )
 
 
+def publish_pool_gauges(pool: str, replicas, breakers, active_strategy_name: str) -> None:
+    """
+    Refresh the per-pool gauges that the dashboard and Phoenix scrape.
+
+    These three gauges are pull-driven (set whenever someone looks at
+    /balancer/pools) rather than emitted at every transition. That keeps
+    the hot path lock-free and saves a write per request while still
+    giving the dashboard fresh numbers at its poll cadence.
+
+    - lb_pool_size{pool, status}: replicas in each lifecycle state
+    - lb_circuit_state{pool, instance_id}: 0 closed, 1 half_open, 2 open
+    - lb_strategy{pool, strategy}: 1 for the active strategy, 0 for the rest
+    """
+    from .circuit_breaker import CircuitState
+
+    counts: dict[str, int] = {}
+    for r in replicas:
+        s = r.status.value if hasattr(r.status, "value") else str(r.status)
+        counts[s] = counts.get(s, 0) + 1
+        cb = breakers.get(r.container_name)
+        if cb is None:
+            state_val = 0
+        elif cb.state is CircuitState.HALF_OPEN:
+            state_val = 1
+        elif cb.state is CircuitState.OPEN:
+            state_val = 2
+        else:
+            state_val = 0
+        circuit_state.labels(pool, r.container_name).set(state_val)
+    # Always publish all known statuses (zero out drained ones) so panels
+    # don't keep a stale gauge alive after a status transitions away.
+    for s in ("discovered", "ready", "serving", "draining", "ejected", "terminated"):
+        pool_size.labels(pool, s).set(counts.get(s, 0))
+
+    for name in _STRATEGY_NAMES:
+        active_strategy.labels(pool, name).set(1 if name == active_strategy_name else 0)
+
+
+_STRATEGY_NAMES = ("round_robin", "random", "least_connections", "p2c", "chwbl")
+
+
 def status_class(code: int) -> str:
     if 200 <= code < 300:
         return "2xx"
