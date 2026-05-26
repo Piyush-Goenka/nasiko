@@ -34,13 +34,36 @@ class InstanceRegistry:
     async def _run(self) -> None:
         while True:
             try:
-                self.refresh_sync()
+                await self.refresh()
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 pass
             await asyncio.sleep(self._interval)
 
+    async def refresh(self) -> None:
+        """
+        Async refresh entry point used by the background loop.
+
+        Discovery adapters call the Docker socket or the Kubernetes API,
+        both of which are blocking I/O (typically 50-200ms per round trip).
+        Running them inline would stall the event loop and every routing
+        decision for that duration. We offload only the blocking adapter
+        call to a worker thread, then apply state changes and fire
+        subscriber callbacks back on the event loop so they can safely
+        call `asyncio.create_task`.
+        """
+        raws = await asyncio.to_thread(self._adapter.list_replicas)
+        self._apply(raws)
+
     def refresh_sync(self) -> None:
-        raws = self._adapter.list_replicas()
+        """
+        Synchronous refresh, retained for unit tests that pass mocked
+        adapters with negligible work. Production goes through `refresh`.
+        """
+        self._apply(self._adapter.list_replicas())
+
+    def _apply(self, raws) -> None:
         seen: set[str] = set()
         for raw in raws:
             seen.add(raw.container_name)
