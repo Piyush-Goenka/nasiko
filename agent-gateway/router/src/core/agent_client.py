@@ -2,19 +2,33 @@
 Agent client service for communicating with selected agents.
 """
 
+import asyncio
 import logging
 import time
-from typing import Dict, List, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
 from router.src.config import settings
 from router.src.entities import UserRequest
 from router.src.balancer import metrics, tracing
-from router.src.balancer.load_balancer import NoHealthyReplica
-from router.src.balancer.runtime import get_balancer_for, passive_observe_hook
+from router.src.balancer.hedging import hedge_request
+from router.src.balancer.load_balancer import LoadBalancer, NoHealthyReplica
+from router.src.balancer.runtime import (
+    get_balancer_for, get_shared_http_client, passive_observe_hook,
+)
 
 logger = logging.getLogger(__name__)
+
+# Exception classes whose meaning is "transport failure" — these belong on the
+# 5xx counter and the passive-observe hook. Anything else (KeyError,
+# JSONDecodeError, AttributeError, ...) is a programming error and must surface
+# as such rather than masquerading as a transport failure.
+_TRANSPORT_EXC: Tuple[type, ...] = (
+    httpx.HTTPError,
+    asyncio.TimeoutError,
+    OSError,
+)
 
 
 class AgentClientError(Exception):
@@ -62,6 +76,44 @@ class AgentClient:
             path = f"{path}?{p.query}"
         return f"{replica_addr.rstrip('/')}{path}"
 
+    @staticmethod
+    def _routing_key_for(request: UserRequest) -> Optional[str]:
+        for attr in ("session_id", "user_id", "conversation_id"):
+            value = getattr(request, attr, None)
+            if value:
+                return str(value)
+        return None
+
+    async def _post_and_validate(
+        self,
+        url: str,
+        payload: Dict[str, Any],
+        headers: Dict[str, str],
+    ) -> Tuple[Dict[str, Any], int]:
+        """
+        Single source of truth for the HTTP call + response shape validation.
+        Reuses the process-wide pooled httpx.AsyncClient when available (set
+        up at FastAPI startup); otherwise opens a fresh client per request.
+        The pooled path cuts ~one TCP handshake per request under load.
+        Raises:
+          httpx.HTTPStatusError / httpx.RequestError: transport-layer failures
+          AgentClientError: agent-reported "error" field or malformed shape
+        """
+        shared = get_shared_http_client()
+        if shared is not None:
+            response = await shared.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+        else:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+        data = response.json()
+        if "error" in data:
+            raise AgentClientError(f"Agent error: {data['error']}")
+        if "result" not in data:
+            raise AgentClientError("Invalid response: missing 'result' field")
+        return data, response.status_code
+
     async def send_request(
         self,
         agent_url: str,
@@ -82,83 +134,164 @@ class AgentClient:
         if lb is None:
             return await self._legacy_send(agent_url, request, files, token)
 
+        routing_key = self._routing_key_for(request)
         try:
             t0 = time.perf_counter()
-            replica = lb.pick()
+            replica = lb.pick(routing_key=routing_key)
             metrics.route_decision_us.labels(agent_name, lb.strategy_name).observe(
                 (time.perf_counter() - t0) * 1_000_000
             )
         except NoHealthyReplica as e:
             raise AgentClientError(f"no healthy replicas for {agent_name}: {e}") from e
 
-        replica.inflight += 1
-        metrics.inflight.labels(agent_name, replica.container_name).inc()
-        span = tracing.start_route_span(agent_name, lb.strategy_name, replica)
-
         headers: Dict[str, str] = {}
         if token:
             headers["Authorization"] = f"Bearer {token}"
+        payload = self._construct_payload(request, files, agent_url)
+
+        # Hedging path: idempotent requests only. Mutating tool calls (e.g.,
+        # github-agent create-PR) MUST set `idempotent=False` on the request
+        # (or the LoadBalancer's `hedging_enabled` flag must be off) or the
+        # secondary fire-and-cancel could double-execute the side effect.
+        if (
+            lb.hedging_enabled
+            and lb.latency_tracker is not None
+            and getattr(request, "idempotent", True)
+        ):
+            primary, secondary = lb.pick_two(routing_key=routing_key)
+            if secondary is not None:
+                hedge_after_s = lb.latency_tracker.p95_seconds()
+                return await self._hedge_send(
+                    lb=lb,
+                    agent_name=agent_name,
+                    primary=primary,
+                    secondary=secondary,
+                    agent_url=agent_url,
+                    payload=payload,
+                    base_headers=headers,
+                    hedge_after_s=hedge_after_s,
+                )
+
+        return await self._lb_send(
+            lb=lb, agent_name=agent_name, replica=replica,
+            agent_url=agent_url, payload=payload, base_headers=headers,
+        )
+
+    async def _lb_send(
+        self,
+        *,
+        lb: LoadBalancer,
+        agent_name: str,
+        replica,
+        agent_url: str,
+        payload: Dict[str, Any],
+        base_headers: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Single-replica path: instrument, dispatch, record latency."""
+        replica.inflight += 1
+        metrics.inflight.labels(agent_name, replica.container_name).inc()
+        span = tracing.start_route_span(agent_name, lb.strategy_name, replica)
+        headers = dict(base_headers)
         tracing.inject_traceparent(span, headers)
 
         target = self._rewrite_for_replica(agent_url, replica.addr)
-        payload = self._construct_payload(request, files, target)
         t_req = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(target, json=payload, headers=headers)
-                response.raise_for_status()
+            data, status_code = await self._post_and_validate(target, payload, headers)
+        except httpx.HTTPStatusError as e:
+            self._record_transport_failure(
+                agent_name, replica, t_req, e.response.status_code,
+                f"HTTP error from {replica.container_name}: "
+                f"{e.response.status_code} - {e.response.text}",
+            )
+            raise AgentClientError(
+                f"HTTP error from {replica.container_name}: "
+                f"{e.response.status_code} - {e.response.text}"
+            ) from e
+        except _TRANSPORT_EXC as e:
+            self._record_transport_failure(
+                agent_name, replica, t_req, 500,
+                f"Transport error to {replica.container_name}: {e!r}",
+            )
+            raise AgentClientError(
+                f"Request error to {replica.container_name}: {e}"
+            ) from e
+        except AgentClientError:
+            # Agent-reported error from _post_and_validate; do NOT pretend it
+            # was a transport failure. Record the latency only.
             latency_s = time.perf_counter() - t_req
-            sc = metrics.status_class(response.status_code)
+            metrics.request_duration_seconds.labels(
+                agent_name, replica.container_name
+            ).observe(latency_s)
+            raise
+        else:
+            latency_s = time.perf_counter() - t_req
+            sc = metrics.status_class(status_code)
             metrics.requests_total.labels(agent_name, replica.container_name, sc).inc()
             metrics.request_duration_seconds.labels(
                 agent_name, replica.container_name
             ).observe(latency_s)
-            passive_observe_hook(replica, response.status_code, latency_s * 1000)
-
-            data = response.json()
-            if "error" in data:
-                raise AgentClientError(f"Agent error: {data['error']}")
-            if "result" not in data:
-                raise AgentClientError("Invalid response: missing 'result' field")
+            metrics.request_counter.record(agent_name, replica.container_name)
+            passive_observe_hook(replica, status_code, latency_s * 1000)
+            if lb.latency_tracker is not None:
+                lb.latency_tracker.observe(latency_s)
             return data
-
-        except httpx.HTTPStatusError as e:
-            latency_s = time.perf_counter() - t_req
-            metrics.requests_total.labels(agent_name, replica.container_name, "5xx").inc()
-            passive_observe_hook(replica, e.response.status_code, latency_s * 1000)
-            error_msg = (
-                f"HTTP error from {replica.container_name}: "
-                f"{e.response.status_code} - {e.response.text}"
-            )
-            logger.error(error_msg)
-            raise AgentClientError(error_msg) from e
-
-        except httpx.RequestError as e:
-            metrics.requests_total.labels(agent_name, replica.container_name, "5xx").inc()
-            passive_observe_hook(
-                replica, 500, (time.perf_counter() - t_req) * 1000
-            )
-            error_msg = f"Request error to {replica.container_name}: {e}"
-            logger.error(error_msg)
-            raise AgentClientError(error_msg) from e
-
-        except AgentClientError:
-            # Pre-wrapped error from payload validation above; propagate as-is.
-            raise
-
-        except Exception as e:
-            metrics.requests_total.labels(agent_name, replica.container_name, "5xx").inc()
-            passive_observe_hook(
-                replica, 500, (time.perf_counter() - t_req) * 1000
-            )
-            error_msg = f"Unexpected error communicating with {replica.container_name}: {e}"
-            logger.error(error_msg)
-            raise AgentClientError(error_msg) from e
-
         finally:
             replica.inflight -= 1
             metrics.inflight.labels(agent_name, replica.container_name).dec()
             span.end()
+
+    async def _hedge_send(
+        self,
+        *,
+        lb: LoadBalancer,
+        agent_name: str,
+        primary,
+        secondary,
+        agent_url: str,
+        payload: Dict[str, Any],
+        base_headers: Dict[str, str],
+        hedge_after_s: float,
+    ) -> Dict[str, Any]:
+        """Hedged path: race primary against a secondary fired after hedge_after_s."""
+        # Bind in defaults so lambda closure captures the right replicas, not
+        # whichever value `primary`/`secondary` happen to hold when the lambda
+        # is invoked. Defensive against any future caller refactor.
+        async def _call_primary(_r=primary):
+            return await self._lb_send(
+                lb=lb, agent_name=agent_name, replica=_r,
+                agent_url=agent_url, payload=payload, base_headers=base_headers,
+            )
+
+        async def _call_secondary(_r=secondary):
+            return await self._lb_send(
+                lb=lb, agent_name=agent_name, replica=_r,
+                agent_url=agent_url, payload=payload, base_headers=base_headers,
+            )
+
+        return await hedge_request(
+            primary=_call_primary,
+            secondary=_call_secondary,
+            hedge_after_s=hedge_after_s,
+        )
+
+    def _record_transport_failure(
+        self,
+        agent_name: str,
+        replica,
+        t_req: float,
+        status_code: int,
+        log_msg: str,
+    ) -> None:
+        latency_s = time.perf_counter() - t_req
+        sc = metrics.status_class(status_code) if status_code >= 400 else "5xx"
+        metrics.requests_total.labels(agent_name, replica.container_name, sc).inc()
+        metrics.request_duration_seconds.labels(
+            agent_name, replica.container_name
+        ).observe(latency_s)
+        metrics.request_counter.record(agent_name, replica.container_name)
+        passive_observe_hook(replica, status_code, latency_s * 1000)
+        logger.error(log_msg)
 
     async def _legacy_send(
         self,
@@ -168,32 +301,20 @@ class AgentClient:
         token: str,
     ) -> Dict[str, Any]:
         """Original send_request behavior used when no balancer is registered."""
+        translated_url = self._translate_agent_url(agent_url)
+        payload = self._construct_payload(request, files, translated_url)
+
+        logger.info(f"Sending request to agent: {agent_url} -> {translated_url}")
+        logger.debug(f"Payload: {payload}")
+
+        headers: Dict[str, str] = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
         try:
-            translated_url = self._translate_agent_url(agent_url)
-            payload = self._construct_payload(request, files, translated_url)
-
-            logger.info(f"Sending request to agent: {agent_url} -> {translated_url}")
-            logger.debug(f"Payload: {payload}")
-
-            headers = {}
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    translated_url, json=payload, headers=headers
-                )
-                response.raise_for_status()
-
-            data = response.json()
-            if "error" in data:
-                raise AgentClientError(f"Agent error: {data['error']}")
-            if "result" not in data:
-                raise AgentClientError("Invalid response: missing 'result' field")
-
+            data, _ = await self._post_and_validate(translated_url, payload, headers)
             logger.info("Successfully received response from agent")
             return data
-
         except httpx.HTTPStatusError as e:
             error_msg = (
                 f"HTTP error from agent {translated_url}: "
@@ -201,19 +322,8 @@ class AgentClient:
             )
             logger.error(error_msg)
             raise AgentClientError(error_msg) from e
-
-        except httpx.RequestError as e:
+        except _TRANSPORT_EXC as e:
             error_msg = f"Request error to agent {translated_url}: {e}"
-            logger.error(error_msg)
-            raise AgentClientError(error_msg) from e
-
-        except AgentClientError:
-            raise
-
-        except Exception as e:
-            error_msg = (
-                f"Unexpected error communicating with agent {translated_url}: {e}"
-            )
             logger.error(error_msg)
             raise AgentClientError(error_msg) from e
 
@@ -253,7 +363,9 @@ class AgentClient:
             else:
                 raise AgentClientError(f"Unknown response kind: {kind}")
 
-        except Exception as e:
+        except AgentClientError:
+            raise
+        except (KeyError, AttributeError, TypeError) as e:
             error_msg = f"Failed to extract response content: {e}"
             logger.error(error_msg)
             raise AgentClientError(error_msg) from e
@@ -278,6 +390,6 @@ class AgentClient:
                 response = await client.get(health_url)
                 return response.status_code == 200
 
-        except Exception as e:
+        except (httpx.HTTPError, asyncio.TimeoutError, OSError) as e:
             logger.warning(f"Health check failed for agent {agent_url}: {e}")
             return False

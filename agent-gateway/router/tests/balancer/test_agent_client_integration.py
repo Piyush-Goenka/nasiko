@@ -1,13 +1,16 @@
+import asyncio
 import time
 import pytest
 from unittest.mock import MagicMock
 
 import httpx
 from router.src.balancer.circuit_breaker import CircuitBreaker
+from router.src.balancer.hedging import LatencyTracker
 from router.src.balancer.load_balancer import LoadBalancer
 from router.src.balancer.models import Replica, ReplicaStatus
 from router.src.balancer.runtime import (
-    clear_balancers, clear_passive_observers, set_balancer_for,
+    clear_balancers, clear_passive_observers, reset_shared_http_client,
+    set_balancer_for,
 )
 from router.src.balancer.slow_start import SlowStart
 from router.src.balancer.strategies.round_robin import RoundRobin
@@ -88,3 +91,201 @@ async def test_send_request_consults_load_balancer(monkeypatch):
     )
 
     assert seen_urls == ["http://a:5000/invoke", "http://b:5000/invoke"]
+
+
+@pytest.mark.asyncio
+async def test_send_request_falls_back_to_legacy_when_no_balancer(monkeypatch):
+    """Regression for T10: when no LoadBalancer is registered for the agent,
+    send_request must fall through to _legacy_send (which uses the original
+    kong-gateway URL translation), not raise or silently drop."""
+    clear_balancers()
+    clear_passive_observers()
+
+    seen_urls: list[str] = []
+
+    class _FakeClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *exc): return False
+        async def post(self, url, json=None, headers=None, **kw):
+            seen_urls.append(url)
+            resp = MagicMock(status_code=200)
+            resp.json = lambda: {"result": {"kind": "message"}}
+            resp.raise_for_status = lambda: None
+            return resp
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+
+    from router.src.core import agent_client as ac_mod
+    monkeypatch.setattr(
+        ac_mod.AgentClient, "_construct_payload",
+        lambda self, request, files, agent_url: {"q": "x"},
+    )
+
+    client = ac_mod.AgentClient()
+    # http://localhost:9100/router/agent/unknown -> kong-gateway:8000 via legacy translate
+    result = await client.send_request(
+        agent_url="http://localhost:9100/router/agent/unknown",
+        request=MagicMock(),
+        files=[],
+        token="t",
+    )
+    assert result == {"result": {"kind": "message"}}
+    assert seen_urls == ["http://kong-gateway:8000/router/agent/unknown"], (
+        f"legacy path must apply _translate_agent_url; got {seen_urls}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_request_hedges_when_enabled(monkeypatch):
+    """Regression for T1: hedging must be reachable from the request path.
+    With hedging_enabled and a primary that sleeps past hedge_after_s, the
+    secondary should fire and the fast response should win."""
+    clear_balancers()
+    clear_passive_observers()
+
+    now = time.monotonic() - 1000
+    primary_rep = Replica(id="slow", agent_name="translator", container_name="slow",
+                          addr="http://slow:5000", status=ReplicaStatus.SERVING,
+                          joined_at=now)
+    secondary_rep = Replica(id="fast", agent_name="translator", container_name="fast",
+                            addr="http://fast:5000", status=ReplicaStatus.SERVING,
+                            joined_at=now)
+    cbs = {"slow": CircuitBreaker(), "fast": CircuitBreaker()}
+
+    # Force pick_two -> (slow, fast) by using a strategy that always picks the
+    # first candidate (slow is index 0; pick_two excludes it for secondary).
+    class _AlwaysFirst:
+        name = "first"
+        def pick(self, candidates, routing_key=None):
+            return candidates[0]
+
+    lb = LoadBalancer(
+        "translator", _Reg([primary_rep, secondary_rep]), _AlwaysFirst(), cbs,
+        slow_start=SlowStart(window_seconds=0),
+        hedging_enabled=True, latency_tracker=LatencyTracker(window=200),
+    )
+    # Pre-seed past the 20-sample warmup so p95_seconds returns the real
+    # tail, not the 1.0s warmup default.
+    for _ in range(30):
+        lb.latency_tracker.observe(0.05)  # p95 ~50ms
+    set_balancer_for("translator", lb)
+
+    class _RaceClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *exc): return False
+        async def post(self, url, json=None, headers=None, **kw):
+            if "slow" in url:
+                await asyncio.sleep(0.5)  # primary stalls
+            else:
+                await asyncio.sleep(0.01)  # secondary wins
+            resp = MagicMock(status_code=200)
+            resp.json = lambda: {"result": {"kind": "message", "from": url}}
+            resp.raise_for_status = lambda: None
+            return resp
+
+    monkeypatch.setattr(httpx, "AsyncClient", _RaceClient)
+
+    from router.src.core import agent_client as ac_mod
+    monkeypatch.setattr(
+        ac_mod.AgentClient, "_construct_payload",
+        lambda self, request, files, agent_url: {"q": "x"},
+    )
+
+    client = ac_mod.AgentClient()
+    start = time.perf_counter()
+    result = await client.send_request(
+        agent_url="http://a2a-translator:5000/invoke",
+        request=MagicMock(),
+        files=[],
+        token="t",
+    )
+    elapsed = time.perf_counter() - start
+    assert "fast" in result["result"]["from"], (
+        f"secondary should have won; got {result}"
+    )
+    assert elapsed < 0.4, (
+        f"hedge should return in ~hedge_after_s + secondary_latency, not "
+        f"wait for primary's 500ms; took {elapsed:.3f}s"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_request_reuses_shared_http_client(monkeypatch):
+    """Regression for T9: once setup_shared_http_client has been called,
+    every send_request must reuse the pooled client instead of opening a
+    fresh one (which would cost a TCP handshake per call)."""
+    clear_balancers()
+    clear_passive_observers()
+    reset_shared_http_client()
+
+    a = Replica(id="a", agent_name="translator", container_name="a",
+                addr="http://a:5000", status=ReplicaStatus.SERVING,
+                joined_at=time.monotonic() - 1000)
+    cbs = {"a": CircuitBreaker()}
+    lb = LoadBalancer(
+        "translator", _Reg([a]), RoundRobin(), cbs,
+        slow_start=SlowStart(window_seconds=0),
+    )
+    set_balancer_for("translator", lb)
+
+    construct_count = {"n": 0}
+    post_calls: list[str] = []
+
+    class _PooledClient:
+        def __init__(self, *a, **kw):
+            construct_count["n"] += 1
+            self._closed = False
+
+        async def post(self, url, json=None, headers=None, **kw):
+            assert not self._closed, "pooled client used after close"
+            post_calls.append(url)
+            resp = MagicMock(status_code=200)
+            resp.json = lambda: {"result": {"kind": "message"}}
+            resp.raise_for_status = lambda: None
+            return resp
+
+        async def aclose(self):
+            self._closed = True
+
+        # Provide the async-context-manager hooks so the per-request fallback
+        # path also works against this mock; the test asserts we don't take it.
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            await self.aclose()
+            return False
+
+    monkeypatch.setattr(httpx, "AsyncClient", _PooledClient)
+
+    # Initialize the shared client via the same code path main.py uses.
+    from router.src.balancer.runtime import (
+        close_shared_http_client, setup_shared_http_client,
+    )
+    setup_shared_http_client(timeout=httpx.Timeout(5.0))
+    assert construct_count["n"] == 1, "setup_shared_http_client should construct exactly one client"
+
+    from router.src.core import agent_client as ac_mod
+    monkeypatch.setattr(
+        ac_mod.AgentClient, "_construct_payload",
+        lambda self, request, files, agent_url: {"q": "x"},
+    )
+
+    client = ac_mod.AgentClient()
+    for _ in range(5):
+        await client.send_request(
+            agent_url="http://a2a-translator:5000/invoke",
+            request=MagicMock(),
+            files=[],
+            token="t",
+        )
+
+    assert construct_count["n"] == 1, (
+        f"expected the pooled client to be reused; got "
+        f"{construct_count['n']} AsyncClient constructions across 5 send_request calls"
+    )
+    assert len(post_calls) == 5
+    await close_shared_http_client()
+    reset_shared_http_client()
