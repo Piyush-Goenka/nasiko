@@ -31,7 +31,8 @@ from router.src.balancer.load_balancer import LoadBalancer
 from router.src.balancer.models import Event
 from router.src.balancer.registry import InstanceRegistry
 from router.src.balancer.runtime import (
-    register_passive_observer, set_balancer_for,
+    close_shared_http_client, register_passive_observer,
+    set_balancer_for, setup_shared_http_client,
 )
 from router.src.balancer.slow_start import SlowStart
 from router.src.balancer.strategies.round_robin import RoundRobin
@@ -122,6 +123,17 @@ async def _balancer_startup():
         enabled=os.environ.get("BALANCER_TRACING", "true").lower() == "true",
     )
 
+    # Pooled HTTP client for the agent-call hot path. Keeps connections warm
+    # across requests; bounded to 100 concurrent sockets to protect against
+    # runaway fan-out. Must live inside the event loop, so we create it here.
+    setup_shared_http_client(
+        timeout=httpx.Timeout(settings.REQUEST_TIMEOUT),
+        max_connections=int(os.environ.get("BALANCER_HTTP_MAX_CONNECTIONS", "100")),
+        max_keepalive_connections=int(
+            os.environ.get("BALANCER_HTTP_MAX_KEEPALIVE", "20")
+        ),
+    )
+
     adapter = _build_discovery_adapter()
     if adapter is None:
         logger.warning("Balancer: discovery disabled; AgentClient will use legacy single-URL path")
@@ -186,6 +198,7 @@ async def _balancer_shutdown():
     if _balancer_http is not None:
         await _balancer_http.aclose()
         _balancer_http = None
+    await close_shared_http_client()
 
 
 class _LazyRegistryProxy:
