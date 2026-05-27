@@ -28,7 +28,7 @@ from router.src.balancer.discovery.k8s_adapter import K8sDiscoveryAdapter
 from router.src.balancer.events import EventBroker
 from router.src.balancer.health import HealthChecker
 from router.src.balancer.load_balancer import LoadBalancer
-from router.src.balancer.models import Event
+from router.src.balancer.models import Event, ReplicaStatus
 from router.src.balancer.registry import InstanceRegistry
 from router.src.balancer.runtime import (
     close_shared_http_client, register_passive_observer,
@@ -149,11 +149,39 @@ async def _balancer_startup():
     async def http_get(url, timeout):
         return await _balancer_http.get(url, timeout=timeout)
 
+    def _on_status_change(replica, old, new):
+        # Map probe-driven status transitions to SSE event types so the
+        # dashboard's lifecycle stream shows the demo narrative end-to-end.
+        type_map = {
+            "ready": "replica_ready",
+            "serving": "replica_serving",
+            "draining": "replica_draining",
+        }
+        ev_type = type_map.get(new.value)
+        if ev_type is None:
+            return
+        _balancer_events.emit(Event(
+            ts=time.time(), type=ev_type,
+            pool=replica.agent_name, instance_id=replica.container_name,
+            detail={"from": old.value, "to": new.value},
+        ))
+
+    def _on_probe_failed(replica):
+        _balancer_events.emit(Event(
+            ts=time.time(), type="health_check_failed",
+            pool=replica.agent_name, instance_id=replica.container_name,
+            detail={
+                "consecutive_failures": replica.consecutive_health_failures,
+            },
+        ))
+
     _balancer_health = HealthChecker(
         breakers=_balancer_breakers,
         http_get=http_get,
         interval=float(os.environ.get("BALANCER_HEALTH_INTERVAL_S", "5")),
         timeout=float(os.environ.get("BALANCER_HEALTH_TIMEOUT_S", "2")),
+        on_status_change=_on_status_change,
+        on_probe_failed=_on_probe_failed,
     )
 
     seen_agents: set[str] = set()
@@ -161,6 +189,43 @@ async def _balancer_startup():
     # this, every terminated replica leaves a coroutine pinging a dead address
     # every 5s forever (memory + breaker noise + event spam).
     probe_tasks: dict[str, asyncio.Task] = {}
+    slow_start_tasks: dict[str, asyncio.Task] = {}
+
+    def _make_cb_transition_hook(replica):
+        # Translate per-breaker state changes into SSE events. Bind `replica`
+        # via default arg so the closure captures the right one even if
+        # `on_change` is re-entered for another replica before this fires.
+        def _hook(new_state, _r=replica):
+            type_map = {
+                "open": "circuit_open",
+                "half_open": "circuit_half_open",
+                "closed": "circuit_closed",
+            }
+            ev_type = type_map.get(new_state.value)
+            if ev_type is None:
+                return
+            _balancer_events.emit(Event(
+                ts=time.time(), type=ev_type,
+                pool=_r.agent_name, instance_id=_r.container_name,
+                detail={"state": new_state.value},
+            ))
+        return _hook
+
+    async def _slow_start_complete_watch(replica):
+        # One-shot waiter that emits slow_start_complete when the replica
+        # leaves the ramp. Cancelled together with the health-probe task
+        # when the replica is removed.
+        try:
+            await asyncio.sleep(_balancer_slow_start.window_seconds)
+        except asyncio.CancelledError:
+            return
+        if replica.status not in (
+            ReplicaStatus.TERMINATED, ReplicaStatus.DRAINING,
+        ):
+            _balancer_events.emit(Event(
+                ts=time.time(), type="slow_start_complete",
+                pool=replica.agent_name, instance_id=replica.container_name,
+            ))
 
     def on_change(kind: str, r):
         if kind == "added":
@@ -168,6 +233,7 @@ async def _balancer_startup():
                 failure_threshold=int(os.environ.get("BALANCER_CB_FAILURE_THRESHOLD", "5")),
                 cooldown_initial=float(os.environ.get("BALANCER_CB_COOLDOWN_INITIAL_S", "10")),
                 cooldown_max=float(os.environ.get("BALANCER_CB_COOLDOWN_MAX_S", "300")),
+                on_transition=_make_cb_transition_hook(r),
             )
             _balancer_events.emit(Event(
                 ts=time.time(), type="replica_added",
@@ -183,10 +249,17 @@ async def _balancer_startup():
                 set_balancer_for(r.agent_name, lb)
             task = asyncio.create_task(_balancer_health.run_probe(r))
             probe_tasks[r.container_name] = task
+            if _balancer_slow_start.window_seconds > 0:
+                slow_start_tasks[r.container_name] = asyncio.create_task(
+                    _slow_start_complete_watch(r)
+                )
         elif kind == "removed":
             task = probe_tasks.pop(r.container_name, None)
             if task is not None and not task.done():
                 task.cancel()
+            ss_task = slow_start_tasks.pop(r.container_name, None)
+            if ss_task is not None and not ss_task.done():
+                ss_task.cancel()
             _balancer_events.emit(Event(
                 ts=time.time(), type="replica_terminated",
                 pool=r.agent_name, instance_id=r.container_name,

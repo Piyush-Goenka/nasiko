@@ -25,13 +25,22 @@ class HealthChecker:
                  http_get: Callable[..., Awaitable] | None = None,
                  interval: float = 5.0,
                  timeout: float = 2.0,
-                 active_failure_threshold: int = 2):
+                 active_failure_threshold: int = 2,
+                 on_status_change: Callable[[Replica, ReplicaStatus, ReplicaStatus], None] | None = None,
+                 on_probe_failed: Callable[[Replica], None] | None = None):
         self._breakers = breakers
         self._http_get = http_get
         self._interval = interval
         self._timeout = timeout
         self._active_threshold = active_failure_threshold
         self._last_observed_at: dict[str, float] = {}
+        # Observer hooks. main.py wires these into the EventBroker so that
+        # DISCOVERED -> READY -> SERVING transitions become replica_ready /
+        # replica_serving SSE events and probe failures become
+        # health_check_failed events. Errors in observers must never break
+        # the probe loop, so callers are wrapped in try/except.
+        self._on_status_change = on_status_change
+        self._on_probe_failed = on_probe_failed
 
     def passive_observe(self, replica: Replica, status_code: int,
                         latency_ms: float) -> None:
@@ -69,14 +78,31 @@ class HealthChecker:
             if ok:
                 replica.consecutive_health_failures = 0
                 if replica.status is ReplicaStatus.DISCOVERED:
-                    replica.status = ReplicaStatus.READY
+                    self._transition(replica, ReplicaStatus.READY)
                 elif replica.status is ReplicaStatus.READY:
-                    replica.status = ReplicaStatus.SERVING
+                    self._transition(replica, ReplicaStatus.SERVING)
             else:
                 replica.consecutive_health_failures += 1
+                self._fire_probe_failed(replica)
                 if breaker is not None and replica.consecutive_health_failures >= self._active_threshold:
                     breaker.on_failure()
             await asyncio.sleep(self._interval)
+
+    def _transition(self, replica: Replica, new_status: ReplicaStatus) -> None:
+        old = replica.status
+        replica.status = new_status
+        if self._on_status_change is not None:
+            try:
+                self._on_status_change(replica, old, new_status)
+            except Exception:
+                pass
+
+    def _fire_probe_failed(self, replica: Replica) -> None:
+        if self._on_probe_failed is not None:
+            try:
+                self._on_probe_failed(replica)
+            except Exception:
+                pass
 
     async def _probe_once(self, replica: Replica) -> bool:
         """
