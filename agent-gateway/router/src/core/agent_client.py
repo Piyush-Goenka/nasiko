@@ -137,10 +137,12 @@ class AgentClient:
         routing_key = self._routing_key_for(request)
         try:
             t0 = time.perf_counter()
-            replica = lb.pick(routing_key=routing_key)
+            replica, pick_stats = lb.pick_with_stats(routing_key=routing_key)
+            decision_us = (time.perf_counter() - t0) * 1_000_000
             metrics.route_decision_us.labels(agent_name, lb.strategy_name).observe(
-                (time.perf_counter() - t0) * 1_000_000
+                decision_us
             )
+            pick_stats["decision_latency_us"] = decision_us
         except NoHealthyReplica as e:
             raise AgentClientError(f"no healthy replicas for {agent_name}: {e}") from e
 
@@ -175,6 +177,7 @@ class AgentClient:
         return await self._lb_send(
             lb=lb, agent_name=agent_name, replica=replica,
             agent_url=agent_url, payload=payload, base_headers=headers,
+            pick_stats=pick_stats,
         )
 
     async def _lb_send(
@@ -186,11 +189,22 @@ class AgentClient:
         agent_url: str,
         payload: Dict[str, Any],
         base_headers: Dict[str, str],
+        pick_stats: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Single-replica path: instrument, dispatch, record latency."""
         replica.inflight += 1
         metrics.inflight.labels(agent_name, replica.container_name).inc()
-        span = tracing.start_route_span(agent_name, lb.strategy_name, replica)
+        span_kwargs = {}
+        if pick_stats:
+            for k in (
+                "pool_size", "healthy_count", "decision_latency_us",
+                "candidates_considered", "inflight_at_selection",
+            ):
+                if k in pick_stats:
+                    span_kwargs[k] = pick_stats[k]
+        span = tracing.start_route_span(
+            agent_name, lb.strategy_name, replica, **span_kwargs,
+        )
         headers = dict(base_headers)
         tracing.inject_traceparent(span, headers)
 

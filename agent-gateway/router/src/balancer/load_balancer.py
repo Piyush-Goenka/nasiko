@@ -73,6 +73,17 @@ class LoadBalancer:
             return self._strategy.pick(candidates)
 
     def pick(self, routing_key: str | None = None) -> Replica:
+        replica, _ = self.pick_with_stats(routing_key)
+        return replica
+
+    def pick_with_stats(self, routing_key: str | None = None) -> tuple[Replica, dict]:
+        """
+        Returns (replica, stats). The stats dict carries the numbers the OTel
+        `lb.route` span needs (pool_size, healthy_count, candidates_considered,
+        inflight_at_selection) so callers do not need to walk the registry a
+        second time. Strategy decision latency is recorded by the caller, which
+        owns the perf_counter.
+        """
         replicas = self._registry.replicas_for(self.agent_name)
         candidates: list[Replica] = []
         for r in replicas:
@@ -98,7 +109,15 @@ class LoadBalancer:
                 rest = [c for c in candidates if c.container_name != picked.container_name]
                 if rest:
                     picked = self._strategy_pick(rest, routing_key)
-        return picked
+        stats = {
+            "pool_size": len(replicas),
+            "healthy_count": sum(
+                1 for r in replicas if r.status is ReplicaStatus.SERVING
+            ),
+            "candidates_considered": len(candidates),
+            "inflight_at_selection": picked.inflight,
+        }
+        return picked, stats
 
     def pick_two(self, routing_key: str | None = None) -> tuple[Replica, Replica | None]:
         """Pick a primary and (when possible) a distinct secondary for hedging."""

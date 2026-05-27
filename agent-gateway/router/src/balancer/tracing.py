@@ -41,10 +41,38 @@ def inject_traceparent(span, headers: dict) -> None:
     _PROPAGATOR.inject(headers, context=ctx)
 
 
-def start_route_span(pool: str, strategy: str, replica):
+def start_route_span(
+    pool: str,
+    strategy: str,
+    replica,
+    *,
+    pool_size: int | None = None,
+    healthy_count: int | None = None,
+    decision_latency_us: float | None = None,
+    candidates_considered: int | None = None,
+    inflight_at_selection: int | None = None,
+):
+    """
+    Start the `lb.route` span. The implicit current OTel context is used as
+    the parent automatically, so this span chains under any upstream span
+    Nasiko set up (router, orchestrator). Optional kwargs fill in the
+    routing-decision attributes the plan calls out; passing None for any
+    of them skips that attribute rather than poisoning the trace with
+    sentinel values.
+    """
     tracer = trace.get_tracer("nasiko-balancer")
     span = tracer.start_span("lb.route")
     span.set_attribute("lb.pool", pool)
     span.set_attribute("lb.strategy", strategy)
     span.set_attribute("lb.selected_instance", replica.container_name)
+    if pool_size is not None:
+        span.set_attribute("lb.pool_size", pool_size)
+    if healthy_count is not None:
+        span.set_attribute("lb.healthy_count", healthy_count)
+    if decision_latency_us is not None:
+        span.set_attribute("lb.decision_latency_us", float(decision_latency_us))
+    if candidates_considered is not None:
+        span.set_attribute("lb.candidates_considered", candidates_considered)
+    if inflight_at_selection is not None:
+        span.set_attribute("lb.inflight_at_selection", inflight_at_selection)
     return span
