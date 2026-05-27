@@ -1,8 +1,12 @@
 import asyncio
+import logging
 import time
+from collections import deque
 from typing import Callable
 from .discovery.base import DiscoveryAdapter
 from .models import Replica, ReplicaStatus
+
+logger = logging.getLogger(__name__)
 
 
 class InstanceRegistry:
@@ -16,11 +20,14 @@ class InstanceRegistry:
     load-balancer pool updates, dashboard events).
     """
 
-    def __init__(self, adapter: DiscoveryAdapter, refresh_interval: float = 5.0):
+    def __init__(self, adapter: DiscoveryAdapter, refresh_interval: float = 5.0,
+                 terminated_history: int = 256):
         self._adapter = adapter
         self._interval = refresh_interval
         self._replicas: dict[str, Replica] = {}  # keyed by container_name
-        self._terminated: list[Replica] = []
+        # Bounded ring so long-running routers don't accumulate every replica
+        # they have ever seen. 256 entries covers normal scale churn for hours.
+        self._terminated: deque[Replica] = deque(maxlen=terminated_history)
         self._subscribers: list[Callable[[str, Replica], None]] = []
         self._task: asyncio.Task | None = None
 
@@ -38,7 +45,11 @@ class InstanceRegistry:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                pass
+                # Discovery hiccups (Docker socket blip, K8s API throttle) are
+                # transient. Log at WARNING so operators see the pattern
+                # without paging on every retry; we'll catch up on the next
+                # interval.
+                logger.warning("registry refresh failed", exc_info=True)
             await asyncio.sleep(self._interval)
 
     async def refresh(self) -> None:
@@ -102,4 +113,10 @@ class InstanceRegistry:
             try:
                 cb(kind, r)
             except Exception:
-                pass
+                # A misbehaving subscriber must not break delivery to the
+                # others or stall future refreshes. Log so the failure is
+                # visible without poisoning the loop.
+                logger.warning(
+                    "registry subscriber raised for %s replica=%s",
+                    kind, r.container_name, exc_info=True,
+                )
