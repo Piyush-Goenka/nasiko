@@ -67,10 +67,14 @@ class LoadBalancer:
 
     def _strategy_pick(self, candidates: list[Replica],
                        routing_key: str | None) -> Replica:
-        try:
+        # Strategies that consume a routing_key (CHWBL today) declare
+        # `affinity = True` as a class attribute. Branching on the flag
+        # avoids the previous try/except TypeError pattern, which would
+        # silently swallow a real TypeError raised from inside pick() and
+        # then call pick() a second time without the offending argument.
+        if getattr(self._strategy, "affinity", False):
             return self._strategy.pick(candidates, routing_key=routing_key)
-        except TypeError:
-            return self._strategy.pick(candidates)
+        return self._strategy.pick(candidates)
 
     def pick(self, routing_key: str | None = None) -> Replica:
         replica, _ = self.pick_with_stats(routing_key)
