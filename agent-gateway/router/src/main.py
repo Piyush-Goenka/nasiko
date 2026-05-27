@@ -27,6 +27,7 @@ from router.src.balancer.discovery.docker_adapter import DockerDiscoveryAdapter
 from router.src.balancer.discovery.k8s_adapter import K8sDiscoveryAdapter
 from router.src.balancer.events import EventBroker
 from router.src.balancer.health import HealthChecker
+from router.src.balancer.hedging import LatencyTracker
 from router.src.balancer.load_balancer import LoadBalancer
 from router.src.balancer.models import Event, ReplicaStatus
 from router.src.balancer.registry import InstanceRegistry
@@ -242,9 +243,14 @@ async def _balancer_startup():
             ))
             if r.agent_name not in seen_agents:
                 seen_agents.add(r.agent_name)
+                hedging_on = os.environ.get(
+                    "BALANCER_HEDGING_ENABLED", "false"
+                ).lower() in {"1", "true", "yes", "y", "on"}
                 lb = LoadBalancer(
                     r.agent_name, _balancer_registry, RoundRobin(),
                     _balancer_breakers, _balancer_slow_start,
+                    hedging_enabled=hedging_on,
+                    latency_tracker=LatencyTracker() if hedging_on else None,
                 )
                 set_balancer_for(r.agent_name, lb)
             task = asyncio.create_task(_balancer_health.run_probe(r))
