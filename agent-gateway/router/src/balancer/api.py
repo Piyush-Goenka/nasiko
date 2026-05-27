@@ -1,13 +1,31 @@
 import json
+import time
 from pathlib import Path
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from .events import EventBroker
+from .hedging import LatencyTracker
 from .metrics import REGISTRY, fairness_gini, gini, publish_pool_gauges, request_counter
+from .models import Event
 from .runtime import all_balancers, get_balancer_for
+
+
+class StrategyUpdate(BaseModel):
+    """Request body for PUT /balancer/strategy/{agent_name}.
+
+    `strategy` is required and validated against the registered strategy
+    names. `hedging` is optional; passing it toggles per-pool hedging at
+    runtime without restarting the router.
+    """
+
+    strategy: str = Field(..., min_length=1)
+    hedging: Optional[bool] = None
 
 
 def build_router(registry, events: EventBroker, breakers: dict | None = None) -> APIRouter:
@@ -72,24 +90,46 @@ def build_router(registry, events: EventBroker, breakers: dict | None = None) ->
         return {"pools": out}
 
     @router.put("/strategy/{agent_name}")
-    def set_strategy(agent_name: str, body: dict):
+    def set_strategy(agent_name: str, body: StrategyUpdate):
         lb = get_balancer_for(agent_name)
         if lb is None:
             raise HTTPException(404, "no balancer")
-        strategy = body.get("strategy")
-        if not strategy:
-            raise HTTPException(400, "missing strategy")
+        previous_strategy = lb.strategy_name
         try:
-            lb.set_strategy(strategy)
+            lb.set_strategy(body.strategy)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        hedging_changed = False
+        if body.hedging is not None:
+            previous_hedging = lb.hedging_enabled
+            lb.hedging_enabled = body.hedging
+            # Lazy-init a tracker so hedging can be toggled on without a
+            # restart. Existing tracker is kept (we want its accumulated
+            # samples) to avoid resetting the p95 trigger.
+            if body.hedging and lb.latency_tracker is None:
+                lb.latency_tracker = LatencyTracker()
+            hedging_changed = previous_hedging != lb.hedging_enabled
         # Push the strategy gauge right away so the dashboard reflects the
         # swap without waiting for the next /pools poll.
         if breakers is not None:
             publish_pool_gauges(
-                agent_name, registry.replicas_for(agent_name), breakers, strategy,
+                agent_name, registry.replicas_for(agent_name), breakers, body.strategy,
             )
-        return {"agent_name": agent_name, "strategy": strategy}
+        if previous_strategy != body.strategy or hedging_changed:
+            events.emit(Event(
+                ts=time.time(), type="strategy_changed",
+                pool=agent_name, instance_id="",
+                detail={
+                    "from": previous_strategy,
+                    "to": body.strategy,
+                    "hedging": lb.hedging_enabled,
+                },
+            ))
+        return {
+            "agent_name": agent_name,
+            "strategy": body.strategy,
+            "hedging": lb.hedging_enabled,
+        }
 
     @router.get("/events")
     async def stream_events():
