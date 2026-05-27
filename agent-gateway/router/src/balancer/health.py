@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import math
 import time
 import urllib.parse
 from typing import Awaitable, Callable
 from .circuit_breaker import CircuitBreaker
 from .models import Replica, ReplicaStatus
+
+logger = logging.getLogger(__name__)
 
 EWMA_TAU_SECONDS = 30.0
 
@@ -113,6 +116,17 @@ class HealthChecker:
         First success wins; the replica is marked healthy.
         """
         if self._http_get is None:
+            # No probe wired: warn once per replica so a misconfigured
+            # production deploy is visible in the logs rather than silently
+            # marking everything healthy forever. Tests that intentionally
+            # pass http_get=None just see the warning and move on.
+            if not getattr(replica, "_warned_no_http_get", False):
+                logger.warning(
+                    "HealthChecker.http_get is None for %s; treating as healthy. "
+                    "Wire an http_get to enable real probing.",
+                    replica.container_name,
+                )
+                replica._warned_no_http_get = True  # type: ignore[attr-defined]
             return True
         for path in ("/health", "/.well-known/agent-card"):
             try:
