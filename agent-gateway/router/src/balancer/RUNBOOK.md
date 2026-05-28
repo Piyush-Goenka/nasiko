@@ -39,7 +39,7 @@
 
 - Cause: strategy hot-swap didn't apply, OR a replica is circuit-open and
   being skipped.
-- Check: `GET /balancer/pool/<agent>` — verify `strategy` field matches
+- Check: `GET /balancer/pool/<agent>`, verify `strategy` field matches
   expectation, and all replicas are `SERVING`.
 - Action: re-`PUT /balancer/strategy/<agent>`; check event log for
   `circuit_open` events.

@@ -23,8 +23,11 @@ class Replica:
     consecutive_5xx: int = 0
     ewma_latency_ms: float = 0.0
 
-@dataclass
+@dataclass(frozen=True)
 class Event:
+    """Immutable lifecycle record. Frozen because events are append-only:
+    once emitted, they must not be mutated by subscribers (the same
+    instance is replayed to every SSE consumer)."""
     ts: float
     type: str
     pool: str

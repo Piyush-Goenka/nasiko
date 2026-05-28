@@ -183,6 +183,19 @@
     return diffs / (2 * values.length * values.length * (s / values.length));
   }
 
+  // Debounce loadPool refreshes from the SSE stream. A docker compose
+  // --scale to 10 fires 10 replica_added events in a burst; without
+  // debouncing that's 10 sequential /balancer/pool fetches which can
+  // pin the router right when the demo is supposed to look smooth.
+  let _refreshTimer = null;
+  function scheduleRefresh() {
+    if (_refreshTimer !== null) return;
+    _refreshTimer = setTimeout(() => {
+      _refreshTimer = null;
+      loadPool(currentAgent);
+    }, 500);
+  }
+
   function startEventStream() {
     if (sse) sse.close();
     sse = new EventSource(`${API}/balancer/events`);
@@ -198,8 +211,8 @@
         if (ec.firstChild && ec.firstChild.textContent === "Waiting for events…") ec.innerHTML = "";
         ec.insertBefore(div, ec.firstChild);
         while (ec.children.length > 50) ec.removeChild(ec.lastChild);
-        // Refresh pool on lifecycle change
-        loadPool(currentAgent);
+        // Refresh pool on lifecycle change, coalescing bursts of events.
+        scheduleRefresh();
       } catch (_) {}
     };
     sse.onerror = () => { /* will reconnect automatically */ };

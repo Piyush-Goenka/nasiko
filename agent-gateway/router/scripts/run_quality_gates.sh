@@ -14,16 +14,18 @@ echo "=== Balancer tests ==="
 python -m pytest tests/balancer/ -v
 
 echo ""
-echo "=== Coverage report (informational) ==="
-if python -c "import pytest_cov" 2>/dev/null; then
-    python -m pytest tests/balancer/ \
-      --cov=src/balancer \
-      --cov-report=term-missing \
-      --cov-fail-under=80 \
-      -q
-else
-    echo "(pytest-cov not installed; skipping coverage gate)"
+echo "=== Coverage gate (>=90%) ==="
+# pytest-cov is a required dev dependency. Surface the missing-dep error
+# loudly rather than silently skipping; the gate must be enforceable.
+if ! python -c "import pytest_cov" 2>/dev/null; then
+    echo "ERROR: pytest-cov is required. Install with: uv pip install pytest-cov"
+    exit 1
 fi
+python -m pytest tests/balancer/ \
+  --cov=router.src.balancer \
+  --cov-report=term-missing \
+  --cov-fail-under=90 \
+  -q
 
 echo ""
 echo "=== Fairness benchmark (Gini at 1000 picks) ==="

@@ -27,10 +27,15 @@ class K8sDiscoveryAdapter:
             if pod.status.phase != "Running" or not pod.status.pod_ip:
                 continue
             agent_name = (pod.metadata.labels or {}).get(self._selector, "unknown")
+            # Pick the first declared container port the pod actually exposes.
+            # Falls back to 5000 (Nasiko's default agent port) when the spec
+            # doesn't enumerate ports. The prior `if == 5000` filter was a
+            # no-op: it only matched 5000, defeating port discovery for any
+            # agent bound to a non-default port.
             port = next(
                 (p.container_port for c in pod.spec.containers
                                        for p in (c.ports or [])
-                                       if p.container_port == 5000),
+                                       if p.container_port),
                 5000,
             )
             out.append(RawReplica(

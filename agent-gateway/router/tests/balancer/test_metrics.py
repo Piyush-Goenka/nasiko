@@ -1,7 +1,11 @@
 import random
+import time
+from router.src.balancer.circuit_breaker import CircuitBreaker, CircuitState
 from router.src.balancer.metrics import (
-    RequestCounter, coefficient_of_variation, gini, status_class,
+    RequestCounter, active_strategy, circuit_state, coefficient_of_variation,
+    gini, pool_size, publish_pool_gauges, status_class,
 )
+from router.src.balancer.models import Replica, ReplicaStatus
 
 
 def test_gini_zero_for_equal_distribution():
@@ -67,6 +71,58 @@ def test_request_counter_rolling_window_drops_old_events():
     # Read at t=120: only the t=20 + t=60 cutoff line survives; a's events
     # at t=0 and t=10 fall out (older than 60s).
     assert rc.counts_for("translator", ["a", "b"], now=120.0) == [0, 0]
+
+
+def test_publish_pool_gauges_sets_pool_size_circuit_strategy():
+    """Regression for M8: pool_size, circuit_state, and lb_strategy gauges
+    must actually get .set() when publish_pool_gauges runs. Without this,
+    Prometheus panels show empty series."""
+    replicas = [
+        Replica(id=n, agent_name="t", container_name=n,
+                addr=f"http://{n}:5000",
+                status=ReplicaStatus.SERVING if i < 2 else ReplicaStatus.DISCOVERED,
+                joined_at=time.monotonic())
+        for i, n in enumerate(("a", "b", "c"))
+    ]
+    cb_open = CircuitBreaker(failure_threshold=1)
+    cb_open.on_failure()  # OPEN
+    breakers = {"a": CircuitBreaker(), "b": cb_open, "c": CircuitBreaker()}
+
+    publish_pool_gauges("t", replicas, breakers, "p2c")
+
+    # Pool size by status
+    assert pool_size.labels("t", "serving")._value.get() == 2
+    assert pool_size.labels("t", "discovered")._value.get() == 1
+    assert pool_size.labels("t", "terminated")._value.get() == 0
+    # Circuit state values: 0 closed, 2 open
+    assert circuit_state.labels("t", "a")._value.get() == 0
+    assert circuit_state.labels("t", "b")._value.get() == 2
+    # Strategy 1 for p2c, 0 for the others
+    assert active_strategy.labels("t", "p2c")._value.get() == 1
+    assert active_strategy.labels("t", "round_robin")._value.get() == 0
+
+
+def test_publish_pool_gauges_handles_unregistered_breaker():
+    """If a replica has no entry in breakers (race during registry refresh),
+    circuit_state must default to 0 (closed) rather than crashing."""
+    r = Replica(id="x", agent_name="t", container_name="x",
+                addr="http://x:5000", status=ReplicaStatus.SERVING,
+                joined_at=time.monotonic())
+    publish_pool_gauges("t", [r], breakers={}, active_strategy_name="round_robin")
+    assert circuit_state.labels("t", "x")._value.get() == 0
+
+
+def test_publish_pool_gauges_half_open_breaker_reports_one():
+    r = Replica(id="x", agent_name="t2", container_name="x",
+                addr="http://x:5000", status=ReplicaStatus.SERVING,
+                joined_at=time.monotonic())
+    cb = CircuitBreaker(failure_threshold=1, cooldown_initial=0.001)
+    cb.on_failure()  # OPEN
+    time.sleep(0.005)
+    cb.can_pass()  # promotes to HALF_OPEN
+    assert cb.state is CircuitState.HALF_OPEN
+    publish_pool_gauges("t2", [r], {"x": cb}, "round_robin")
+    assert circuit_state.labels("t2", "x")._value.get() == 1
 
 
 def test_request_counter_gini_reports_imbalance_then_decays():
