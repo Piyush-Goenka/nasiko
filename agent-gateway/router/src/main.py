@@ -304,10 +304,25 @@ class _LazyRegistryProxy:
         return _balancer_registry.all_replicas()
 
 
+def _require_bearer(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> HTTPAuthorizationCredentials:
+    """Bearer-token gate for mutating balancer endpoints.
+
+    Matches the policy on /router (the user-request entry point) so any
+    operator with a router token can hot-swap strategies, but anonymous
+    network access cannot.
+    """
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    return credentials
+
+
 app.include_router(build_balancer_router(
     registry=_LazyRegistryProxy(),
     events=_balancer_events,
     breakers=_balancer_breakers,
+    auth_dependency=_require_bearer,
 ))
 
 

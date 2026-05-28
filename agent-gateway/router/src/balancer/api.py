@@ -1,10 +1,11 @@
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -28,19 +29,29 @@ class StrategyUpdate(BaseModel):
     hedging: Optional[bool] = None
 
 
-def build_router(registry, events: EventBroker, breakers: dict | None = None) -> APIRouter:
+def build_router(
+    registry,
+    events: EventBroker,
+    breakers: dict | None = None,
+    auth_dependency: Optional[Callable] = None,
+) -> APIRouter:
     """
     FastAPI router exposing the balancer dashboard surface.
 
     Endpoints:
       GET  /balancer/pool/{agent_name}     snapshot of a single agent's pool
       GET  /balancer/pools                 summary of all pools (+ fairness Gini)
-      PUT  /balancer/strategy/{agent_name} hot-swap the active strategy
+      PUT  /balancer/strategy/{agent_name} hot-swap the active strategy (auth)
       GET  /balancer/events                SSE stream of pool lifecycle events
       GET  /balancer/metrics               Prometheus exposition
+
+    `auth_dependency` is wired only onto the mutating PUT endpoint. Read
+    endpoints stay open so the dashboard and Prometheus scrape do not need
+    credentials. Pass None to leave everything open (used by tests).
     """
 
     router = APIRouter(prefix="/balancer", tags=["balancer"])
+    mutate_deps = [Depends(auth_dependency)] if auth_dependency is not None else []
 
     @router.get("/pool/{agent_name}")
     def get_pool(agent_name: str):
@@ -89,7 +100,7 @@ def build_router(registry, events: EventBroker, breakers: dict | None = None) ->
             })
         return {"pools": out}
 
-    @router.put("/strategy/{agent_name}")
+    @router.put("/strategy/{agent_name}", dependencies=mutate_deps)
     def set_strategy(agent_name: str, body: StrategyUpdate):
         lb = get_balancer_for(agent_name)
         if lb is None:

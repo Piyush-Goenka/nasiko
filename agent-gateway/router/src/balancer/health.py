@@ -61,10 +61,18 @@ class HealthChecker:
             replica.consecutive_5xx += 1
             if breaker is not None:
                 breaker.on_failure()
-        else:
+        elif 200 <= status_code < 300:
             replica.consecutive_5xx = 0
             if breaker is not None:
                 breaker.on_success()
+        else:
+            # 3xx/4xx are not a replica fault. Reset the consecutive-5xx
+            # counter so a 4xx after some 5xx errors does not artificially
+            # keep the count climbing, but do NOT call breaker.on_success():
+            # a 4xx is not evidence the replica is healthy, and treating it
+            # that way would silently "heal" a HALF_OPEN breaker via client
+            # errors (auth failures, validation rejects, missing routes).
+            replica.consecutive_5xx = 0
 
     async def run_probe(self, replica: Replica, stop_after: float | None = None) -> None:
         start = time.monotonic()

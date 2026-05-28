@@ -60,14 +60,18 @@ class CircuitBreaker:
 
     def on_failure(self) -> None:
         if self.state is CircuitState.HALF_OPEN:
-            self._open(double_cooldown=True)
+            self._open()
             return
         self._consecutive_failures += 1
         if self._consecutive_failures >= self.failure_threshold:
-            self._open(double_cooldown=False)
+            self._open()
 
-    def _open(self, double_cooldown: bool) -> None:
-        if double_cooldown and self.state is CircuitState.HALF_OPEN:
+    def _open(self) -> None:
+        # Re-opening from HALF_OPEN means the probe failed: extend the
+        # cooldown geometrically (capped) so a flapping replica gets
+        # increasingly long timeouts. Opening from CLOSED keeps the
+        # current cooldown unchanged (typically the initial value).
+        if self.state is CircuitState.HALF_OPEN:
             self._current_cooldown = min(self._current_cooldown * 2, self.cooldown_max)
         self._set_state(CircuitState.OPEN)
         self._opened_at = time.monotonic()

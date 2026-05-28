@@ -84,3 +84,94 @@ def test_metrics_endpoint_returns_prom_text():
     r = client.get("/balancer/metrics")
     assert r.status_code == 200
     assert b"lb_requests_total" in r.content
+
+
+def test_put_strategy_toggles_hedging_and_emits_strategy_changed():
+    """The PUT endpoint must honor the optional hedging field and emit a
+    strategy_changed event when the toggle flips state."""
+    reg, broker = _setup()
+    app = FastAPI()
+    app.include_router(build_router(registry=reg, events=broker))
+    client = TestClient(app)
+    r = client.put(
+        "/balancer/strategy/t",
+        json={"strategy": "p2c", "hedging": True},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["strategy"] == "p2c"
+    assert body["hedging"] is True
+    # A strategy_changed event should be in the broker's history
+    types = [e.type for e in broker.history()]
+    assert "strategy_changed" in types
+
+
+def test_put_strategy_unknown_agent_returns_404():
+    """Mutating an unknown pool must 404, not 500."""
+    reg, broker = _setup()
+    app = FastAPI()
+    app.include_router(build_router(registry=reg, events=broker))
+    client = TestClient(app)
+    r = client.put(
+        "/balancer/strategy/does-not-exist",
+        json={"strategy": "random"},
+    )
+    assert r.status_code == 404
+
+
+def test_get_pool_unknown_agent_returns_404():
+    reg, broker = _setup()
+    app = FastAPI()
+    app.include_router(build_router(registry=reg, events=broker))
+    client = TestClient(app)
+    assert client.get("/balancer/pool/missing").status_code == 404
+
+
+def test_put_strategy_requires_auth_when_dependency_wired():
+    """Regression for I3/N2: when an auth dependency is provided, an
+    anonymous PUT must be rejected. Read endpoints (`/pools`, `/pool/{name}`)
+    stay open so the dashboard and Prometheus scrape do not need credentials.
+    """
+    from fastapi import HTTPException
+    from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+    reg, broker = _setup()
+    security = HTTPBearer(auto_error=False)
+
+    def _require_token(
+        creds: HTTPAuthorizationCredentials = __import__(
+            "fastapi"
+        ).Depends(security),
+    ):
+        if creds is None or creds.credentials != "let-me-in":
+            raise HTTPException(status_code=401, detail="forbidden")
+        return creds
+
+    app = FastAPI()
+    app.include_router(
+        build_router(registry=reg, events=broker, auth_dependency=_require_token),
+    )
+    client = TestClient(app)
+
+    # Anonymous mutation blocked
+    r = client.put("/balancer/strategy/t", json={"strategy": "random"})
+    assert r.status_code == 401
+
+    # Wrong token blocked
+    r = client.put(
+        "/balancer/strategy/t",
+        json={"strategy": "random"},
+        headers={"Authorization": "Bearer wrong"},
+    )
+    assert r.status_code == 401
+
+    # Read endpoint still anonymous
+    assert client.get("/balancer/pool/t").status_code == 200
+
+    # Correct token succeeds
+    r = client.put(
+        "/balancer/strategy/t",
+        json={"strategy": "random"},
+        headers={"Authorization": "Bearer let-me-in"},
+    )
+    assert r.status_code == 200
