@@ -155,24 +155,29 @@ class AgentClient:
         # github-agent create-PR) MUST set `idempotent=False` on the request
         # (or the LoadBalancer's `hedging_enabled` flag must be off) or the
         # secondary fire-and-cancel could double-execute the side effect.
+        # We only call pick_secondary when hedging would actually fire, so
+        # the second inflight reservation is bounded.
+        secondary = None
         if (
             lb.hedging_enabled
             and lb.latency_tracker is not None
             and getattr(request, "idempotent", True)
         ):
-            primary, secondary = lb.pick_two(routing_key=routing_key)
-            if secondary is not None:
-                hedge_after_s = lb.latency_tracker.p95_seconds()
-                return await self._hedge_send(
-                    lb=lb,
-                    agent_name=agent_name,
-                    primary=primary,
-                    secondary=secondary,
-                    agent_url=agent_url,
-                    payload=payload,
-                    base_headers=headers,
-                    hedge_after_s=hedge_after_s,
-                )
+            secondary = lb.pick_secondary(replica, routing_key=routing_key)
+
+        if secondary is not None:
+            hedge_after_s = lb.latency_tracker.p95_seconds()
+            return await self._hedge_send(
+                lb=lb,
+                agent_name=agent_name,
+                primary=replica,
+                secondary=secondary,
+                agent_url=agent_url,
+                payload=payload,
+                base_headers=headers,
+                hedge_after_s=hedge_after_s,
+                primary_pick_stats=pick_stats,
+            )
 
         return await self._lb_send(
             lb=lb, agent_name=agent_name, replica=replica,
@@ -191,8 +196,13 @@ class AgentClient:
         base_headers: Dict[str, str],
         pick_stats: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Single-replica path: instrument, dispatch, record latency."""
-        replica.inflight += 1
+        """Single-replica path: instrument, dispatch, record latency.
+
+        `replica.inflight` was already incremented by `LoadBalancer.pick_with_stats`
+        (or `pick_secondary` on the hedge path) so the strategy's view stayed
+        consistent during selection. We only mirror the Prometheus gauge here
+        and decrement both in the finally clause.
+        """
         metrics.inflight.labels(agent_name, replica.container_name).inc()
         span_kwargs = {}
         if pick_stats:
@@ -266,15 +276,23 @@ class AgentClient:
         payload: Dict[str, Any],
         base_headers: Dict[str, str],
         hedge_after_s: float,
+        primary_pick_stats: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Hedged path: race primary against a secondary fired after hedge_after_s."""
+        """Hedged path: race primary against a secondary fired after hedge_after_s.
+
+        Both `primary` and `secondary` already have their inflight pre-incremented
+        by the LoadBalancer. The two `_lb_send` calls handle the matching
+        decrements in their finally clauses, so the totals stay balanced even
+        when one branch is cancelled.
+        """
         # Bind in defaults so lambda closure captures the right replicas, not
         # whichever value `primary`/`secondary` happen to hold when the lambda
         # is invoked. Defensive against any future caller refactor.
-        async def _call_primary(_r=primary):
+        async def _call_primary(_r=primary, _stats=primary_pick_stats):
             return await self._lb_send(
                 lb=lb, agent_name=agent_name, replica=_r,
                 agent_url=agent_url, payload=payload, base_headers=base_headers,
+                pick_stats=_stats,
             )
 
         async def _call_secondary(_r=secondary):

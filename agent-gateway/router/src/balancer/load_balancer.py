@@ -87,6 +87,13 @@ class LoadBalancer:
         inflight_at_selection) so callers do not need to walk the registry a
         second time. Strategy decision latency is recorded by the caller, which
         owns the perf_counter.
+
+        IMPORTANT: this method atomically increments `picked.inflight` before
+        returning. Strategies that read inflight (LeastConnections, P2C) see a
+        consistent view of the pool because no other coroutine can interleave
+        between selection and increment (no awaits inside this function). The
+        caller MUST eventually decrement exactly once; AgentClient does it in
+        the finally clause of `_lb_send` / `_hedge_send`.
         """
         replicas = self._registry.replicas_for(self.agent_name)
         candidates: list[Replica] = []
@@ -121,11 +128,19 @@ class LoadBalancer:
             "candidates_considered": len(candidates),
             "inflight_at_selection": picked.inflight,
         }
+        # Reserve the slot before returning so a concurrent pick on the next
+        # request sees this one as already in flight. Closes the herd race
+        # in LeastConnections / P2C under burst load.
+        picked.inflight += 1
         return picked, stats
 
-    def pick_two(self, routing_key: str | None = None) -> tuple[Replica, Replica | None]:
-        """Pick a primary and (when possible) a distinct secondary for hedging."""
-        primary = self.pick(routing_key=routing_key)
+    def pick_secondary(self, primary: Replica,
+                       routing_key: str | None = None) -> Replica | None:
+        """
+        Pick a distinct, healthy replica for hedging against `primary`.
+        Pre-increments inflight on the secondary (same contract as
+        pick_with_stats). Returns None when no other candidate is healthy.
+        """
         replicas = self._registry.replicas_for(self.agent_name)
         candidates = [
             r for r in replicas
@@ -134,6 +149,7 @@ class LoadBalancer:
             and self._breakers.get(r.container_name, _NEUTRAL_BREAKER).can_pass()
         ]
         if not candidates:
-            return primary, None
+            return None
         secondary = self._strategy_pick(candidates, routing_key)
-        return primary, secondary
+        secondary.inflight += 1
+        return secondary
