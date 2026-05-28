@@ -24,10 +24,11 @@ done
 
 # 3. Snapshot the pool (fairness Gini should be < 0.1)
 curl -s http://localhost:8081/balancer/pools | jq
-
-# 4. See the full demo (scale -> split -> kill -> recover -> hot-swap)
-./agent-gateway/router/scripts/demo.sh
 ```
+
+The end-to-end demo script (scale -> split -> kill -> recover -> hot-swap)
+and the 3-minute recording walkthrough live outside the repo under the
+hackathon workspace at `../demo/`.
 
 ## Endpoints
 
@@ -120,7 +121,8 @@ All knobs are env vars, defaults are production-friendly:
 | `BALANCER_TRACING`                   | `true`                                               |
 | `PHOENIX_OTLP_ENDPOINT`              | `http://phoenix-observability:4318/v1/traces`        |
 
-See [`RUNBOOK.md`](RUNBOOK.md) for failure-mode playbooks and SLOs.
+Failure-mode playbooks and SLOs live in the hackathon workspace at
+`../../RUNBOOK.md` (kept outside the source tree).
 
 ## Running the quality gates
 
