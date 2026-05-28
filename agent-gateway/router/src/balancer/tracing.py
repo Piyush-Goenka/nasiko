@@ -9,6 +9,7 @@ trace context regardless of whether the exporter actually shipped a span.
 
 from opentelemetry import trace, propagate
 from opentelemetry.propagators.composite import CompositePropagator
+from opentelemetry.trace import NoOpTracer
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
 
@@ -17,12 +18,21 @@ _PROPAGATOR = CompositePropagator(
 )
 propagate.set_global_textmap(_PROPAGATOR)
 
+# Cached tracer chosen at startup. Holding a reference avoids a global lookup
+# on every routing decision and, more importantly, lets us return a real
+# NoOpTracer when tracing is disabled instead of relying on the OTel default
+# tracer's implicit no-op-when-no-provider behaviour, which can still attempt
+# OTLP exports under partial-init conditions.
+_TRACER = NoOpTracer()
+
 
 def setup_tracer(service_name: str = "nasiko-balancer",
                  endpoint: str | None = None,
                  enabled: bool = True):
+    global _TRACER
     if not enabled:
-        return trace.get_tracer(service_name)
+        _TRACER = NoOpTracer()
+        return _TRACER
     try:
         from phoenix.otel import register
         register(
@@ -30,10 +40,11 @@ def setup_tracer(service_name: str = "nasiko-balancer",
             endpoint=endpoint or "http://phoenix-observability:4318/v1/traces",
             auto_instrument=True,
         )
+        _TRACER = trace.get_tracer(service_name)
     except Exception:
         # Phoenix not reachable at startup; keep router up, spans become no-ops.
-        pass
-    return trace.get_tracer(service_name)
+        _TRACER = NoOpTracer()
+    return _TRACER
 
 
 def inject_traceparent(span, headers: dict) -> None:
@@ -60,8 +71,7 @@ def start_route_span(
     of them skips that attribute rather than poisoning the trace with
     sentinel values.
     """
-    tracer = trace.get_tracer("nasiko-balancer")
-    span = tracer.start_span("lb.route")
+    span = _TRACER.start_span("lb.route")
     span.set_attribute("lb.pool", pool)
     span.set_attribute("lb.strategy", strategy)
     span.set_attribute("lb.selected_instance", replica.container_name)

@@ -121,6 +121,46 @@ def test_routing_key_reaches_strategy_on_both_pick_and_repick():
     )
 
 
+def test_weight_aware_strategy_skips_slow_start_repick():
+    """Regression for I7: P2C and LeastConnections already deweight cold
+    replicas inside their scoring. The outer slow-start re-pick must NOT
+    fire on top of them, otherwise cold replicas get double-deweighted and
+    effectively never serve traffic during their ramp.
+    """
+    seen_calls: list[int] = []
+
+    class _WeightAwareSpy:
+        name = "spy_wa"
+        weight_aware = True
+
+        def pick(self, candidates):
+            seen_calls.append(len(candidates))
+            return candidates[0]
+
+    # Mid-ramp: weight ~0.17 would trigger a re-pick if it ran.
+    now = time.monotonic()
+    replicas = [
+        Replica(id=n, agent_name="t", container_name=n,
+                addr=f"http://{n}:5000", status=ReplicaStatus.SERVING,
+                joined_at=now - 5)
+        for n in ("a", "b")
+    ]
+    cbs = {r.container_name: CircuitBreaker() for r in replicas}
+    lb = LoadBalancer(
+        agent_name="t", registry=_FakeReg(replicas),
+        strategy=_WeightAwareSpy(), breakers=cbs,
+        slow_start=SlowStart(window_seconds=30.0),
+    )
+    for _ in range(50):
+        lb.pick()
+    # Exactly one strategy call per pick: re-pick must never fire for a
+    # weight-aware strategy.
+    assert len(seen_calls) == 50, (
+        f"expected exactly 50 strategy calls; got {len(seen_calls)}. "
+        f"weight_aware=True must suppress the slow-start re-pick"
+    )
+
+
 def test_set_strategy_hot_swaps():
     replicas = [_r("a"), _r("b")]
     cbs = {r.container_name: CircuitBreaker() for r in replicas}

@@ -14,6 +14,11 @@ class P2C:
     """
 
     name = "p2c"
+    # P2C consults SlowStart.weight() when scoring candidates, so the
+    # LoadBalancer's outer slow-start re-pick must NOT fire on top of it.
+    # Otherwise cold replicas get deweighted twice and effectively never
+    # serve traffic during their ramp.
+    weight_aware = True
 
     def __init__(self, slow_start: SlowStart):
         self._ss = slow_start

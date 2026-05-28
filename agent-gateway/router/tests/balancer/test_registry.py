@@ -1,3 +1,6 @@
+import asyncio
+import logging
+import pytest
 from unittest.mock import MagicMock
 from router.src.balancer.registry import InstanceRegistry
 from router.src.balancer.discovery.docker_adapter import DockerDiscoveryAdapter
@@ -43,6 +46,65 @@ def test_registry_parses_agent_name_from_container_name_when_label_missing():
     reg = InstanceRegistry(adapter=_docker_adapter_with(containers))
     reg.refresh_sync()
     assert {r.agent_name for r in reg.all_replicas()} == {"github", "translator"}
+
+
+def test_subscriber_exception_does_not_break_delivery_to_others(caplog):
+    """Regression for I8: a misbehaving subscriber must not block notifications
+    to other subscribers, and the failure must surface in the logs."""
+    container = _FakeContainer(
+        "a2a-translator-1", "abc1", {"com.nasiko.agent": "translator"},
+    )
+    reg = InstanceRegistry(adapter=_docker_adapter_with([container]))
+    delivered = []
+
+    def _bad(kind, r):
+        raise RuntimeError("subscriber boom")
+
+    def _good(kind, r):
+        delivered.append((kind, r.container_name))
+
+    reg.subscribe(_bad)
+    reg.subscribe(_good)
+    with caplog.at_level(logging.WARNING, logger="router.src.balancer.registry"):
+        reg.refresh_sync()
+    assert ("added", "a2a-translator-1") in delivered
+    assert any("subscriber raised" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_stop_awaits_cancelled_task():
+    """Regression for I9: stop() must cancel AND await the refresh task so
+    shutdown does not produce 'Task was destroyed but it is pending' warnings."""
+
+    class _SlowAdapter:
+        def list_replicas(self):
+            return []
+
+    reg = InstanceRegistry(adapter=_SlowAdapter(), refresh_interval=0.01)
+    await reg.start()
+    await asyncio.sleep(0.05)  # let one refresh fire
+    await reg.stop()
+    assert reg._task is None, "stop() must clear the task handle"
+
+
+@pytest.mark.asyncio
+async def test_run_loop_logs_refresh_failures(caplog):
+    """Regression for I8: refresh errors must log instead of silently passing."""
+
+    class _BoomAdapter:
+        calls = 0
+
+        def list_replicas(self):
+            type(self).calls += 1
+            raise RuntimeError("docker socket down")
+
+    reg = InstanceRegistry(adapter=_BoomAdapter(), refresh_interval=0.01)
+    with caplog.at_level(logging.WARNING, logger="router.src.balancer.registry"):
+        await reg.start()
+        await asyncio.sleep(0.05)
+        await reg.stop()
+    assert _BoomAdapter.calls >= 1
+    assert any("registry refresh failed" in rec.message for rec in caplog.records)
 
 
 def test_registry_marks_disappeared_replicas_terminated():

@@ -83,6 +83,7 @@ class LoadBalancer:
         self._registry = registry
         self._strategy = strategy
         self._strategy_uses_key = _strategy_accepts_routing_key(strategy)
+        self._strategy_weight_aware = getattr(strategy, "weight_aware", False)
         self._breakers = breakers
         self._slow_start = slow_start or SlowStart()
         self.hedging_enabled = hedging_enabled
@@ -95,6 +96,7 @@ class LoadBalancer:
     def set_strategy(self, name: str) -> None:
         self._strategy = _build(name, self._slow_start)
         self._strategy_uses_key = _strategy_accepts_routing_key(self._strategy)
+        self._strategy_weight_aware = getattr(self._strategy, "weight_aware", False)
 
     def _strategy_pick(self, candidates: list[Replica],
                        routing_key: str | None) -> Replica:
@@ -140,10 +142,15 @@ class LoadBalancer:
         if not candidates:
             raise NoHealthyReplica(f"no healthy replicas for {self.agent_name}")
         picked = self._strategy_pick(candidates, routing_key)
-        # Slow-start re-pick: makes "watch the ramp" demo visible regardless of
-        # active strategy. A replica at weight=0.2 gets re-picked with P=0.8.
-        # Pass routing_key through so CHWBL keeps session affinity during ramps.
-        if len(candidates) > 1:
+        # Slow-start re-pick: makes "watch the ramp" demo visible for
+        # strategies that don't consult SlowStart.weight() themselves
+        # (round_robin, random, chwbl). A replica at weight=0.2 gets
+        # re-picked with P=0.8. P2C and LeastConnections already
+        # deweight cold replicas inside their scoring, so re-picking
+        # on top of them would double-deweight; we skip the re-pick
+        # there. Pass routing_key through so CHWBL keeps session
+        # affinity during ramps.
+        if not self._strategy_weight_aware and len(candidates) > 1:
             w = self._slow_start.weight(picked)
             if w < 1.0 and random.random() > w:
                 rest = [c for c in candidates if c.container_name != picked.container_name]

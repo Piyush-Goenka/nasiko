@@ -34,9 +34,25 @@ class InstanceRegistry:
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run())
 
-    async def stop(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
+    async def stop(self, timeout: float = 5.0) -> None:
+        """
+        Cancel the refresh loop and wait for it to unwind. Without the await,
+        the cancelled task could outlive shutdown and produce
+        "Task was destroyed but it is pending!" warnings, or, worse, hold
+        a reference to the Docker/K8s client past `close()`.
+        """
+        if self._task is None:
+            return
+        self._task.cancel()
+        try:
+            await asyncio.wait_for(self._task, timeout=timeout)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            # CancelledError is the expected unwind path; TimeoutError means
+            # the task is stuck in a non-cooperative call (e.g., a slow
+            # adapter response) and shutdown should not block on it.
+            pass
+        finally:
+            self._task = None
 
     async def _run(self) -> None:
         while True:
