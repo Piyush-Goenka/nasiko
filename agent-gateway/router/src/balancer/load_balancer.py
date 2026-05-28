@@ -1,3 +1,4 @@
+import inspect
 import random
 from .circuit_breaker import CircuitBreaker
 from .models import Replica, ReplicaStatus
@@ -8,6 +9,34 @@ from .strategies.least_connections import LeastConnections
 from .strategies.p2c import P2C
 from .strategies.random_strategy import Random
 from .strategies.round_robin import RoundRobin
+
+
+def _strategy_accepts_routing_key(strategy: Strategy) -> bool:
+    """
+    Decide whether a strategy wants the routing_key kwarg.
+
+    Two signals, in priority order:
+      1. `affinity = True` class attribute (CHWBL declares this).
+      2. `routing_key` appears in pick()'s signature.
+
+    The signature check protects against the regression where a strategy
+    accepts routing_key (via **kwargs or an explicit param) but forgets
+    to declare `affinity`. We resolve this once per strategy swap and
+    cache the result.
+    """
+    if getattr(strategy, "affinity", False):
+        return True
+    try:
+        sig = inspect.signature(strategy.pick)
+    except (TypeError, ValueError):
+        return False
+    params = sig.parameters
+    if "routing_key" in params:
+        return True
+    for p in params.values():
+        if p.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+    return False
 
 
 class NoHealthyReplica(RuntimeError):
@@ -53,6 +82,7 @@ class LoadBalancer:
         self.agent_name = agent_name
         self._registry = registry
         self._strategy = strategy
+        self._strategy_uses_key = _strategy_accepts_routing_key(strategy)
         self._breakers = breakers
         self._slow_start = slow_start or SlowStart()
         self.hedging_enabled = hedging_enabled
@@ -64,15 +94,14 @@ class LoadBalancer:
 
     def set_strategy(self, name: str) -> None:
         self._strategy = _build(name, self._slow_start)
+        self._strategy_uses_key = _strategy_accepts_routing_key(self._strategy)
 
     def _strategy_pick(self, candidates: list[Replica],
                        routing_key: str | None) -> Replica:
-        # Strategies that consume a routing_key (CHWBL today) declare
-        # `affinity = True` as a class attribute. Branching on the flag
-        # avoids the previous try/except TypeError pattern, which would
-        # silently swallow a real TypeError raised from inside pick() and
-        # then call pick() a second time without the offending argument.
-        if getattr(self._strategy, "affinity", False):
+        # Cached at construction (and re-cached on set_strategy) so the hot
+        # path branches on a boolean rather than try/except TypeError, which
+        # would silently swallow real TypeErrors raised from inside pick().
+        if self._strategy_uses_key:
             return self._strategy.pick(candidates, routing_key=routing_key)
         return self._strategy.pick(candidates)
 
