@@ -45,6 +45,12 @@ async def hedge_request(
     """
     Fire primary. After hedge_after_s, fire secondary in parallel.
     Return whichever finishes first; cancel the loser via cooperative cancellation.
+
+    Cancelled losers are awaited (with return_exceptions=True) so their
+    CancelledError or any pre-cancel exception is consumed cleanly. Without
+    this, asyncio logs "Task exception was never retrieved" noise into the
+    router logs and the loser's exception is silently dropped instead of
+    being observed by the caller's reporting layer.
     """
     p_task = asyncio.create_task(primary())
     try:
@@ -56,5 +62,11 @@ async def hedge_request(
         )
         for t in pending:
             t.cancel()
+        if pending:
+            # Drain the cancelled task(s) so their state is fully consumed
+            # before we return. return_exceptions=True keeps a CancelledError
+            # or a real failure from propagating up; the loser is by
+            # definition not the result we care about.
+            await asyncio.gather(*pending, return_exceptions=True)
         winner = next(iter(done))
         return winner.result()

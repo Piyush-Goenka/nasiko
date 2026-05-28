@@ -193,11 +193,16 @@ async def test_send_request_hedges_when_enabled(monkeypatch):
         lambda self, request, files, agent_url: {"q": "x"},
     )
 
+    # Explicit opt-in: idempotent=True is required since N3 flipped the
+    # default to False. Mutating callers (e.g., create-PR) must NOT set
+    # this; safe-to-retry reads do.
+    req = MagicMock()
+    req.idempotent = True
     client = ac_mod.AgentClient()
     start = time.perf_counter()
     result = await client.send_request(
         agent_url="http://a2a-translator:5000/invoke",
-        request=MagicMock(),
+        request=req,
         files=[],
         token="t",
     )
@@ -209,6 +214,114 @@ async def test_send_request_hedges_when_enabled(monkeypatch):
         f"hedge should return in ~hedge_after_s + secondary_latency, not "
         f"wait for primary's 500ms; took {elapsed:.3f}s"
     )
+
+
+@pytest.mark.asyncio
+async def test_payload_construction_failure_does_not_leak_inflight(monkeypatch):
+    """Regression for N1: payload is built before pick, so a payload
+    construction error does NOT leave a reserved inflight slot pinned on
+    a replica forever.
+    """
+    clear_balancers()
+    clear_passive_observers()
+
+    a = Replica(id="a", agent_name="translator", container_name="a",
+                addr="http://a:5000", status=ReplicaStatus.SERVING,
+                joined_at=time.monotonic() - 1000)
+    cbs = {"a": CircuitBreaker()}
+    lb = LoadBalancer(
+        "translator", _Reg([a]), RoundRobin(), cbs,
+        slow_start=SlowStart(window_seconds=0),
+    )
+    set_balancer_for("translator", lb)
+
+    from router.src.core import agent_client as ac_mod
+
+    def _boom(self, request, files, agent_url):
+        raise RuntimeError("payload boom")
+
+    monkeypatch.setattr(ac_mod.AgentClient, "_construct_payload", _boom)
+
+    client = ac_mod.AgentClient()
+    with pytest.raises(RuntimeError, match="payload boom"):
+        await client.send_request(
+            agent_url="http://a2a-translator:5000/invoke",
+            request=MagicMock(),
+            files=[],
+            token="t",
+        )
+    assert a.inflight == 0, (
+        f"expected inflight to be released; got {a.inflight}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_hedging_does_not_fire_when_request_not_idempotent(monkeypatch):
+    """Regression for N3: hedging defaults to OFF unless the request
+    explicitly sets idempotent=True. A request without that attribute
+    (or with it False) must take the single-replica path even when the
+    LoadBalancer's hedging is enabled. Verifies the safety default for
+    mutating tool calls.
+    """
+    clear_balancers()
+    clear_passive_observers()
+
+    primary_rep = Replica(id="p", agent_name="translator", container_name="p",
+                          addr="http://p:5000", status=ReplicaStatus.SERVING,
+                          joined_at=time.monotonic() - 1000)
+    secondary_rep = Replica(id="s", agent_name="translator", container_name="s",
+                            addr="http://s:5000", status=ReplicaStatus.SERVING,
+                            joined_at=time.monotonic() - 1000)
+    cbs = {"p": CircuitBreaker(), "s": CircuitBreaker()}
+
+    lb = LoadBalancer(
+        "translator", _Reg([primary_rep, secondary_rep]), RoundRobin(), cbs,
+        slow_start=SlowStart(window_seconds=0),
+        hedging_enabled=True, latency_tracker=LatencyTracker(window=200),
+    )
+    # Seed past warmup with a very low p95 so any hedge would fire instantly.
+    for _ in range(30):
+        lb.latency_tracker.observe(0.001)
+    set_balancer_for("translator", lb)
+
+    seen_urls: list[str] = []
+
+    class _FakeClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *exc): return False
+        async def post(self, url, json=None, headers=None, **kw):
+            seen_urls.append(url)
+            await asyncio.sleep(0.05)
+            resp = MagicMock(status_code=200)
+            resp.json = lambda: {"result": {"kind": "message"}}
+            resp.raise_for_status = lambda: None
+            return resp
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+
+    from router.src.core import agent_client as ac_mod
+    monkeypatch.setattr(
+        ac_mod.AgentClient, "_construct_payload",
+        lambda self, request, files, agent_url: {"q": "x"},
+    )
+
+    # Plain request object: no idempotent attribute -> default False -> no hedge.
+    class _PlainRequest:
+        session_id = "abc"
+
+    client = ac_mod.AgentClient()
+    await client.send_request(
+        agent_url="http://a2a-translator:5000/invoke",
+        request=_PlainRequest(),
+        files=[],
+        token="t",
+    )
+    assert len(seen_urls) == 1, (
+        f"hedging must not fire by default; saw {seen_urls}"
+    )
+    assert primary_rep.inflight == 0
+    assert secondary_rep.inflight == 0
 
 
 @pytest.mark.asyncio

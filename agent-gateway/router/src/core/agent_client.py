@@ -135,6 +135,15 @@ class AgentClient:
             return await self._legacy_send(agent_url, request, files, token)
 
         routing_key = self._routing_key_for(request)
+        # Build payload BEFORE pick so a construction error cannot leak the
+        # pre-incremented inflight slot. If payload construction fails after
+        # a successful pick, the reservation lingers until the next refresh
+        # because no finally clause runs.
+        headers: Dict[str, str] = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        payload = self._construct_payload(request, files, agent_url)
+
         try:
             t0 = time.perf_counter()
             replica, pick_stats = lb.pick_with_stats(routing_key=routing_key)
@@ -146,24 +155,27 @@ class AgentClient:
         except NoHealthyReplica as e:
             raise AgentClientError(f"no healthy replicas for {agent_name}: {e}") from e
 
-        headers: Dict[str, str] = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        payload = self._construct_payload(request, files, agent_url)
-
-        # Hedging path: idempotent requests only. Mutating tool calls (e.g.,
-        # github-agent create-PR) MUST set `idempotent=False` on the request
-        # (or the LoadBalancer's `hedging_enabled` flag must be off) or the
-        # secondary fire-and-cancel could double-execute the side effect.
-        # We only call pick_secondary when hedging would actually fire, so
-        # the second inflight reservation is bounded.
-        secondary = None
-        if (
-            lb.hedging_enabled
-            and lb.latency_tracker is not None
-            and getattr(request, "idempotent", True)
-        ):
-            secondary = lb.pick_secondary(replica, routing_key=routing_key)
+        # From here on, `replica.inflight` is reserved and MUST be released
+        # by exactly one finally clause (_lb_send / _hedge_send) regardless
+        # of which control-flow branch we take. Any code added between this
+        # pick and the dispatch must propagate exceptions through a try/
+        # finally that decrements on the unwind path, or the slot leaks.
+        try:
+            # Hedging path: requests must explicitly opt in via
+            # `idempotent=True`. The default is OFF because mutating tool
+            # calls (e.g., github-agent create-PR) that forget to set the
+            # flag would otherwise be hedged and double-execute. Callers
+            # who know their request is safe to retry set idempotent=True.
+            secondary = None
+            if (
+                lb.hedging_enabled
+                and lb.latency_tracker is not None
+                and getattr(request, "idempotent", False)
+            ):
+                secondary = lb.pick_secondary(replica, routing_key=routing_key)
+        except Exception:
+            replica.inflight -= 1
+            raise
 
         if secondary is not None:
             hedge_after_s = lb.latency_tracker.p95_seconds()
@@ -282,12 +294,15 @@ class AgentClient:
 
         Both `primary` and `secondary` already have their inflight pre-incremented
         by the LoadBalancer. The two `_lb_send` calls handle the matching
-        decrements in their finally clauses, so the totals stay balanced even
-        when one branch is cancelled.
+        decrements in their finally clauses. The secondary may never fire (primary
+        wins under hedge_after_s); we release its reservation in the outer finally
+        so the in-memory inflight gauge does not drift upward forever.
         """
         # Bind in defaults so lambda closure captures the right replicas, not
         # whichever value `primary`/`secondary` happen to hold when the lambda
         # is invoked. Defensive against any future caller refactor.
+        secondary_dispatched = False
+
         async def _call_primary(_r=primary, _stats=primary_pick_stats):
             return await self._lb_send(
                 lb=lb, agent_name=agent_name, replica=_r,
@@ -296,16 +311,25 @@ class AgentClient:
             )
 
         async def _call_secondary(_r=secondary):
+            nonlocal secondary_dispatched
+            secondary_dispatched = True
             return await self._lb_send(
                 lb=lb, agent_name=agent_name, replica=_r,
                 agent_url=agent_url, payload=payload, base_headers=base_headers,
             )
 
-        return await hedge_request(
-            primary=_call_primary,
-            secondary=_call_secondary,
-            hedge_after_s=hedge_after_s,
-        )
+        try:
+            return await hedge_request(
+                primary=_call_primary,
+                secondary=_call_secondary,
+                hedge_after_s=hedge_after_s,
+            )
+        finally:
+            if not secondary_dispatched:
+                # Primary finished before the hedge trigger; release the
+                # secondary's reserved slot so strategy decisions and the
+                # Prometheus gauge stay accurate.
+                secondary.inflight -= 1
 
     def _record_transport_failure(
         self,
