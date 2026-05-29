@@ -15,6 +15,7 @@ from .hedging import LatencyTracker
 from .metrics import REGISTRY, fairness_gini, gini, publish_pool_gauges, request_counter
 from .models import Event
 from .runtime import all_balancers, get_balancer_for
+from .slow_start import SlowStart
 
 
 class StrategyUpdate(BaseModel):
@@ -34,6 +35,7 @@ def build_router(
     events: EventBroker,
     breakers: dict | None = None,
     auth_dependency: Optional[Callable] = None,
+    slow_start: Optional[SlowStart] = None,
 ) -> APIRouter:
     """
     FastAPI router exposing the balancer dashboard surface.
@@ -59,6 +61,11 @@ def build_router(
         if lb is None:
             raise HTTPException(404, "no balancer for agent")
         replicas = registry.replicas_for(agent_name)
+        # 60s rolling request counts per replica so the dashboard can show
+        # "translator-1: 102 req" alongside instantaneous inflight.
+        counts = request_counter.counts_for(
+            agent_name, [r.container_name for r in replicas]
+        )
         return {
             "agent_name": agent_name,
             "strategy": lb.strategy_name,
@@ -71,8 +78,17 @@ def build_router(
                     "inflight": r.inflight,
                     "ewma_latency_ms": r.ewma_latency_ms,
                     "consecutive_5xx": r.consecutive_5xx,
+                    # Rolling 60s request count for this replica.
+                    "requests_60s": counts[i],
+                    # Slow-start weight (0.0..1.0): fraction of full load
+                    # this replica is currently eligible to receive. Stays
+                    # at 1.0 once outside the warm-up window. Lets the
+                    # dashboard render the "35% weight" ramp visually.
+                    "slow_start_weight": (
+                        slow_start.weight(r) if slow_start is not None else 1.0
+                    ),
                 }
-                for r in replicas
+                for i, r in enumerate(replicas)
             ],
         }
 

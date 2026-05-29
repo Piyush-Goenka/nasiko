@@ -387,6 +387,7 @@ app.include_router(build_balancer_router(
     events=_balancer_events,
     breakers=_balancer_breakers,
     auth_dependency=_require_bearer,
+    slow_start=_balancer_slow_start,
 ))
 
 
