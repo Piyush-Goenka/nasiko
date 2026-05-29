@@ -111,6 +111,7 @@ def _build_discovery_adapter():
         return None
 
 
+
 @app.on_event("startup")
 async def _balancer_startup():
     global _balancer_registry, _balancer_health, _balancer_http
@@ -210,6 +211,19 @@ async def _balancer_startup():
                 pool=_r.agent_name, instance_id=_r.container_name,
                 detail={"state": new_state.value},
             ))
+            # Make the lifecycle visible: when the breaker opens, the
+            # replica is no longer serving (it's being drained); when the
+            # breaker closes from half_open, it's healthy again. The pool
+            # filter in pick_with_stats() already excludes non-SERVING
+            # replicas, so this is also the explicit ejection mechanism
+            # operators kept asking for in the runbook.
+            old_status = _r.status
+            if new_state.value == "open" and _r.status is ReplicaStatus.SERVING:
+                _r.status = ReplicaStatus.DRAINING
+            elif new_state.value == "closed" and _r.status is ReplicaStatus.DRAINING:
+                _r.status = ReplicaStatus.SERVING
+            if _r.status is not old_status:
+                _on_status_change(_r, old_status, _r.status)
         return _hook
 
     async def _slow_start_complete_watch(replica):
