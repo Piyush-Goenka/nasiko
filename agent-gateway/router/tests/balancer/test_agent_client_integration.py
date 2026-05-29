@@ -35,6 +35,96 @@ def test_agent_name_from_url_handles_a2a_and_agent_prefixes():
     _agent_name_extraction_smoke()
 
 
+def test_agent_name_from_url_handles_kong_style_path():
+    """Regression: in production the registry returns Kong gateway URLs
+    (http://localhost:9100/agents/agent-a2a-translator), not direct-DNS.
+    Hostname is `localhost`, so a hostname-only extractor would fall back
+    to `localhost` and miss the balancer entirely. The extracted name
+    must match the agent_name the DockerDiscoveryAdapter uses for its
+    registry key, otherwise get_balancer_for(...) returns None and every
+    request silently bypasses the balancer."""
+    from router.src.core.agent_client import AgentClient
+    # Strip exactly one prefix (agent- OR a2a-), matching
+    # DockerDiscoveryAdapter._NAME_RE in discovery/docker_adapter.py.
+    assert AgentClient._agent_name_from_url(
+        "http://localhost:9100/agents/agent-a2a-translator"
+    ) == "a2a-translator"
+    assert AgentClient._agent_name_from_url(
+        "http://localhost:9100/agents/agent-a2a-translator/invoke"
+    ) == "a2a-translator"
+    assert AgentClient._agent_name_from_url(
+        "http://localhost:9100/agents/agent-github"
+    ) == "github"
+    assert AgentClient._agent_name_from_url(
+        "http://localhost:9100/agents/a2a-translator"
+    ) == "translator"
+
+
+@pytest.mark.asyncio
+async def test_send_request_consults_balancer_via_kong_url(monkeypatch):
+    """End-to-end regression: a Kong-style production URL must route through
+    the balancer (one of replicas a/b receives the request), NOT through
+    Kong's legacy upstream. Catches the bug fixed in commit 4b97866 where
+    _agent_name_from_url returned 'localhost' for Kong URLs and the
+    balancer was silently bypassed."""
+    clear_balancers()
+    clear_passive_observers()
+
+    a = Replica(id="a", agent_name="a2a-translator", container_name="agent-a2a-translator",
+                addr="http://agent-a2a-translator:5000", status=ReplicaStatus.SERVING,
+                joined_at=time.monotonic() - 1000)
+    b = Replica(id="b", agent_name="a2a-translator", container_name="agent-a2a-translator-2",
+                addr="http://agent-a2a-translator-2:5000", status=ReplicaStatus.SERVING,
+                joined_at=time.monotonic() - 1000)
+    cbs = {"agent-a2a-translator": CircuitBreaker(),
+           "agent-a2a-translator-2": CircuitBreaker()}
+    lb = LoadBalancer(
+        "a2a-translator", _Reg([a, b]), RoundRobin(), cbs,
+        slow_start=SlowStart(window_seconds=0),
+    )
+    set_balancer_for("a2a-translator", lb)
+
+    seen_urls: list[str] = []
+
+    class _FakeClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *exc): return False
+        async def post(self, url, json=None, headers=None, **kw):
+            seen_urls.append(url)
+            resp = MagicMock(status_code=200)
+            resp.json = lambda: {"result": {"kind": "message"}}
+            resp.raise_for_status = lambda: None
+            return resp
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    from router.src.core import agent_client as ac_mod
+    monkeypatch.setattr(
+        ac_mod.AgentClient, "_construct_payload",
+        lambda self, request, files, agent_url: {"q": "x"},
+    )
+
+    client = ac_mod.AgentClient()
+    # Kong-style URL as produced by the registry in production.
+    for _ in range(4):
+        await client.send_request(
+            agent_url="http://localhost:9100/agents/agent-a2a-translator",
+            request=MagicMock(), files=[], token="t",
+        )
+
+    # The balancer should have rewritten each call to the picked replica's
+    # direct DNS address. If it hadn't, every call would land on
+    # kong-gateway:8000 (the legacy single-URL path).
+    assert all("kong-gateway" not in u for u in seen_urls), (
+        f"balancer was bypassed; calls hit Kong instead of replicas: {seen_urls}"
+    )
+    # Both replicas should have received traffic via round-robin.
+    hosts = {u.split("/")[2] for u in seen_urls}
+    assert hosts == {"agent-a2a-translator:5000", "agent-a2a-translator-2:5000"}, (
+        f"expected both replicas to receive traffic; got {hosts}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_send_request_consults_load_balancer(monkeypatch):
     clear_balancers()
