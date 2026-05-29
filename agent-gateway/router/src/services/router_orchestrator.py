@@ -14,6 +14,7 @@ from router.src.core import (
     AgentClient,
     AgentClientError,
     SessionHistoryService,
+    SessionHistoryError,
 )
 from router.src.entities import UserRequest, RouterResponse, RouterOutput
 from router.src.core.routing_engine import router
@@ -119,13 +120,16 @@ class RouterOrchestrator:
             logger.info("Fetching context of previous user queries...")
             yield self._router_response("Fetching context of previous user queries...")
 
-            response = await self.session_history_service.fetch_session_history(
-                token, request.session_id
-            )
-
-            conversation_history = (
-                self.session_history_service.reconstruct_conversation(response)
-            )
+            try:
+                response = await self.session_history_service.fetch_session_history(
+                    token, request.session_id
+                )
+                conversation_history = (
+                    self.session_history_service.reconstruct_conversation(response)
+                )
+            except SessionHistoryError as e:
+                logger.warning(f"No prior history for session, starting fresh: {e}")
+                conversation_history = []
 
             yield self._router_response("Retrived the conversation history...")
 
