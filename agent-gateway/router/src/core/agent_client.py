@@ -55,11 +55,28 @@ class AgentClient:
     def _agent_name_from_url(agent_url: str) -> str:
         """
         Extract the logical agent name from a URL.
-        http://a2a-translator-1:5000/...  -> "translator"
-        http://agent-github-7:5000/...    -> "github" (legacy prefix)
+        http://a2a-translator-1:5000/...                          -> "translator"
+        http://agent-github-7:5000/...                            -> "github" (legacy prefix)
+        http://localhost:9100/agents/agent-a2a-translator/...     -> "translator" (Kong URL)
         Falls back to the hostname when no recognised prefix matches.
         """
-        host = urlparse(agent_url).hostname or ""
+        parsed = urlparse(agent_url)
+        host = parsed.hostname or ""
+
+        # Kong-style URL: agent name lives in the path under /agents/
+        # Strip exactly one prefix (agent- OR a2a-) to mirror DockerDiscoveryAdapter._NAME_RE.
+        path_parts = [p for p in (parsed.path or "").split("/") if p]
+        if len(path_parts) >= 2 and path_parts[0] == "agents":
+            candidate = path_parts[1]
+            for prefix in ("a2a-", "agent-"):
+                if candidate.startswith(prefix):
+                    parts = candidate[len(prefix):].split("-")
+                    if parts and parts[-1].isdigit():
+                        parts = parts[:-1]
+                    return "-".join(parts) if parts else candidate
+            return candidate
+
+        # Direct-DNS URL (eg http://a2a-translator-1:5000/...)
         for prefix in ("a2a-", "agent-"):
             if host.startswith(prefix):
                 parts = host[len(prefix):].split("-")
