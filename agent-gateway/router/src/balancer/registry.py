@@ -30,6 +30,20 @@ class InstanceRegistry:
         self._terminated: deque[Replica] = deque(maxlen=terminated_history)
         self._subscribers: list[Callable[[str, Replica], None]] = []
         self._task: asyncio.Task | None = None
+        # Event-driven wake-up: external watchers (e.g. Docker events API,
+        # K8s watch) can call .wake() to trigger an immediate refresh
+        # instead of waiting up to `refresh_interval` seconds. The periodic
+        # loop still runs as a reconciliation fallback in case events are
+        # dropped or the watcher disconnects.
+        self._wake: asyncio.Event = asyncio.Event()
+
+    def wake(self) -> None:
+        """Trigger an immediate refresh on the next loop iteration.
+
+        Safe to call from any thread or coroutine; the underlying
+        asyncio.Event uses thread-safe set semantics.
+        """
+        self._wake.set()
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run())
@@ -66,7 +80,15 @@ class InstanceRegistry:
                 # without paging on every retry; we'll catch up on the next
                 # interval.
                 logger.warning("registry refresh failed", exc_info=True)
-            await asyncio.sleep(self._interval)
+            # Wait for either the interval to elapse OR an external wake-up
+            # (Docker events, K8s watch, etc). The .clear() lets subsequent
+            # events trigger again. Periodic refresh stays as a reconciler
+            # in case event delivery is lossy.
+            try:
+                await asyncio.wait_for(self._wake.wait(), timeout=self._interval)
+            except asyncio.TimeoutError:
+                pass
+            self._wake.clear()
 
     async def refresh(self) -> None:
         """

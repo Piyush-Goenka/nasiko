@@ -105,11 +105,50 @@ def _build_discovery_adapter():
         docker_client = docker.from_env()
         network = os.environ.get("AGENTS_NETWORK", "agents-net")
         logger.info(f"Balancer: using Docker discovery on network={network}")
-        return DockerDiscoveryAdapter(docker_client=docker_client, network=network)
+        adapter = DockerDiscoveryAdapter(docker_client=docker_client, network=network)
+        # Stash the raw client so the startup hook can spin up a Docker
+        # events watcher that wakes the registry on container start/die
+        # instead of waiting for the next periodic refresh.
+        adapter._docker_client = docker_client  # type: ignore[attr-defined]
+        return adapter
     except Exception as e:
         logger.warning(f"Balancer: no discovery adapter available ({e}); pool will be empty")
         return None
 
+
+async def _docker_events_watcher(docker_client, registry):
+    """Bridge Docker container events to registry.wake().
+
+    Docker's events stream is a blocking generator from a synchronous
+    socket. We run it in a worker thread and push qualifying events to an
+    asyncio.Queue, then call registry.wake() so the periodic refresh fires
+    immediately. Replicas become visible within ~100ms of `docker run`
+    instead of waiting up to BALANCER_REFRESH_INTERVAL_S seconds.
+
+    Errors (socket disconnect, daemon restart) are logged and the watcher
+    exits cleanly. The periodic refresh in registry._run continues as the
+    reconciliation fallback.
+    """
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def _blocking_reader():
+        try:
+            for ev in docker_client.events(decode=True,
+                                           filters={"type": "container"}):
+                action = ev.get("Action", "")
+                # Only wake on lifecycle transitions that change pool
+                # membership. exec/health events would be noise.
+                if action in ("start", "die", "stop", "kill", "destroy"):
+                    asyncio.run_coroutine_threadsafe(queue.put(action), loop)
+        except Exception:
+            logger.warning("Balancer: docker events stream ended", exc_info=True)
+
+    asyncio.create_task(asyncio.to_thread(_blocking_reader))
+    logger.info("Balancer: docker events watcher subscribed")
+    while True:
+        await queue.get()
+        registry.wake()
 
 
 @app.on_event("startup")
@@ -288,6 +327,17 @@ async def _balancer_startup():
     _balancer_registry.subscribe(on_change)
     register_passive_observer(_balancer_health.passive_observe)
     await _balancer_registry.start()
+
+    # Event-driven discovery: stream Docker container events so newly
+    # scaled replicas are visible within ~100ms instead of waiting up to
+    # one full refresh interval. Best-effort; the periodic poll keeps
+    # things correct if the watcher disconnects.
+    docker_client = getattr(adapter, "_docker_client", None)
+    if docker_client is not None:
+        asyncio.create_task(
+            _docker_events_watcher(docker_client, _balancer_registry)
+        )
+
     logger.info("Balancer: started")
 
 
