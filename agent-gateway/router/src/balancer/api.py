@@ -169,4 +169,16 @@ def build_router(
             raise HTTPException(404, "dashboard.html not bundled")
         return FileResponse(path, media_type="text/html")
 
+    @router.get("/_debug/pick/{agent_name}", include_in_schema=False)
+    def debug_pick(agent_name: str, n: int = 6):
+        """Demo-only: call lb.pick() N times and return the rotation."""
+        lb = get_balancer_for(agent_name)
+        if lb is None:
+            raise HTTPException(404, f"no balancer for {agent_name}")
+        picks = []
+        for _ in range(n):
+            r = lb.pick()
+            picks.append({"container": r.container_name, "addr": r.addr})
+        return {"agent_name": agent_name, "strategy": lb.strategy_name, "picks": picks}
+
     return router
