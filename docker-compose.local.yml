@@ -274,10 +274,16 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       JINA_API_KEY: ${JINA_API_KEY:-}
       JINA_EMBEDDING_MODEL: ${JINA_EMBEDDING_MODEL:-jina-embeddings-v3}
+      K8S_ENABLED: "false"
+      AGENTS_NETWORK: agents-net
+      BALANCER_TRACING: "false"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8081:8000"
     networks:
       - app-network
+      - agents-net
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import requests; requests.get('http://localhost:8000/health').raise_for_status()\" || exit 1"]
       interval: 30s
