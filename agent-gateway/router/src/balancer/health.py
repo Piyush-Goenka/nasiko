@@ -136,7 +136,7 @@ class HealthChecker:
                 )
                 replica._warned_no_http_get = True  # type: ignore[attr-defined]
             return True
-        for path in ("/health", "/.well-known/agent-card"):
+        for path in ("/health", "/.well-known/agent-card.json", "/.well-known/agent.json", "/.well-known/agent-card"):
             try:
                 resp = await self._http_get(replica.addr + path, timeout=self._timeout)
                 if getattr(resp, "status_code", 500) == 200:
