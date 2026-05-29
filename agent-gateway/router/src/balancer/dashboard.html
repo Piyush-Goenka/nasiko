@@ -5,244 +5,681 @@
 <title>BalanceAI · Load Distribution</title>
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --border: #30363d;
-    --fg: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
-    --good: #2ea44f; --bad: #f85149; --warn: #d29922;
+    --bg: #f7f7f5;
+    --panel: #ffffff;
+    --border: #e7e7e3;
+    --fg: #1a1a1a;
+    --muted: #767676;
+    --teal: #5aa9a5;
+    --teal-soft: #cfe8e6;
+    --coral: #e87a6c;
+    --coral-soft: #fbdfd9;
+    --amber: #d8a44a;
+    --amber-soft: #f6e9c8;
+    --green: #6cb087;
+    --slate: #2a3540;
+    --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04);
+    --radius: 14px;
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg); color: var(--fg); padding: 24px;
+  html, body {
+    margin: 0; padding: 0; background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "Inter", sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
   }
-  h1 { margin: 0 0 4px 0; font-size: 28px; }
-  .subtitle { color: var(--muted); margin-bottom: 24px; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 0 22px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+    font-weight: 600; font-size: 17px;
+  }
+  .brand-mark {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--teal) 0%, var(--coral) 100%);
+    border-radius: 8px;
+  }
+  .nav { display: flex; gap: 28px; }
+  .nav a {
+    color: var(--muted); text-decoration: none; font-size: 14px;
+    padding: 6px 0; position: relative;
+  }
+  .nav a.active { color: var(--fg); font-weight: 600; }
+  .nav a.active::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -2px;
+    height: 2px; background: var(--coral); border-radius: 2px;
+  }
+  .topbar .right { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 13px; }
+  .live-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green); margin-right: 6px;
+    box-shadow: 0 0 0 0 rgba(108, 176, 135, 0.5);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(108, 176, 135, 0.5); }
+    70% { box-shadow: 0 0 0 8px rgba(108, 176, 135, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(108, 176, 135, 0); }
+  }
+
+  .filters {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 14px;
+    box-shadow: var(--shadow);
+  }
+  .filter {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border: 1px solid var(--border);
+    border-radius: 8px; background: #fafaf8; font-size: 13px;
+  }
+  .filter-label { color: var(--muted); }
+  .filter select {
+    border: none; background: transparent; font: inherit; color: var(--fg);
+    cursor: pointer; padding: 0; outline: none; font-weight: 600;
+  }
+  .badge {
+    margin-left: auto;
+    padding: 6px 14px; border-radius: 999px;
+    background: var(--teal-soft); color: var(--slate);
+    font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .badge.warn { background: var(--amber-soft); color: #7a5a14; }
+  .badge.bad { background: var(--coral-soft); color: #8a2f22; }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .badge.warn .dot { background: var(--amber); }
+  .badge.bad .dot { background: var(--coral); }
+
   .hero {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 16px; margin-bottom: 24px;
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 16px; margin: 18px 0;
   }
-  .card {
+  .stat-card {
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: 8px; padding: 16px;
+    border-radius: var(--radius); padding: 20px 22px;
+    box-shadow: var(--shadow);
   }
-  .card h3 { margin: 0 0 6px 0; font-size: 12px; text-transform: uppercase;
-             color: var(--muted); letter-spacing: 0.5px; font-weight: 600; }
-  .big { font-size: 32px; font-weight: 700; }
-  .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
-  .grid {
-    display: grid; grid-template-columns: 2fr 1fr; gap: 16px;
+  .stat-label {
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); font-size: 11px; font-weight: 600; margin-bottom: 12px;
   }
-  .bars { display: flex; flex-direction: column; gap: 8px; }
-  .bar-row { display: flex; align-items: center; gap: 12px; }
-  .bar-label { width: 200px; font-family: ui-monospace, monospace; font-size: 13px; }
-  .bar-track { flex: 1; background: #21262d; border-radius: 4px; height: 22px; overflow: hidden; position: relative; }
-  .bar-fill { background: var(--accent); height: 100%; transition: width 0.3s ease; }
-  .bar-fill.serving { background: var(--good); }
-  .bar-fill.ejected { background: var(--bad); }
-  .bar-fill.draining { background: var(--warn); }
-  .bar-value { width: 80px; text-align: right; font-family: ui-monospace, monospace; font-size: 13px; }
-  .status-pill {
-    display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
-    font-weight: 600; text-transform: uppercase;
-  }
-  .status-pill.serving { background: #033a16; color: var(--good); }
-  .status-pill.discovered, .status-pill.ready { background: #3a2d00; color: var(--warn); }
-  .status-pill.ejected, .status-pill.terminated { background: #3a0d0d; color: var(--bad); }
-  select, button {
-    background: #21262d; border: 1px solid var(--border); color: var(--fg);
-    padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;
-  }
-  select:hover, button:hover { border-color: var(--accent); }
-  .events {
+  .stat-value { font-size: 36px; font-weight: 700; line-height: 1; color: var(--fg); }
+  .stat-value.warn { color: var(--amber); }
+  .stat-value.bad { color: var(--coral); }
+  .stat-sub { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .stat-sub.good { color: var(--green); }
+  .stat-sub.warn { color: var(--amber); }
+  .stat-sub.bad { color: var(--coral); }
+
+  .row { display: grid; grid-template-columns: 1.45fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .panel {
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: 8px; padding: 12px; max-height: 400px; overflow-y: auto;
-    font-family: ui-monospace, monospace; font-size: 12px;
+    border-radius: var(--radius); box-shadow: var(--shadow);
   }
-  .event { padding: 4px 0; border-bottom: 1px dotted var(--border); }
-  .event:last-child { border-bottom: none; }
-  .event .ts { color: var(--muted); margin-right: 8px; }
-  .event .type { color: var(--accent); font-weight: 600; margin-right: 8px; }
-  .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
-  .donut {
-    width: 140px; height: 140px; border-radius: 50%;
-    background: conic-gradient(var(--good) 0% 100%);
-    margin: 0 auto 8px;
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 22px 8px;
   }
-  .donut-label { text-align: center; font-size: 14px; color: var(--muted); }
-  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .panel-title { font-weight: 600; font-size: 15px; }
+  .panel-sub { color: var(--muted); font-size: 12px; }
+  .panel-body { padding: 14px 22px 24px; }
+
+  .bars {
+    display: flex; align-items: flex-end; gap: 18px;
+    height: 220px; padding: 16px 8px 0;
+  }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .bar-count { font-size: 15px; font-weight: 600; color: var(--fg); }
+  .bar-track {
+    width: 100%; max-width: 110px; flex: 1; min-height: 6px;
+    background: #f2f1ed; border-radius: 8px 8px 0 0;
+    display: flex; align-items: flex-end; overflow: hidden;
+  }
+  .bar-fill {
+    width: 100%; background: var(--teal);
+    border-radius: 8px 8px 0 0;
+    transition: height 0.45s cubic-bezier(.4,0,.2,1);
+  }
+  .bar-fill.unhealthy {
+    background: repeating-linear-gradient(
+      135deg, var(--coral) 0px, var(--coral) 6px, var(--coral-soft) 6px, var(--coral-soft) 12px
+    );
+  }
+  .bar-fill.recovering {
+    background: repeating-linear-gradient(
+      135deg, var(--amber) 0px, var(--amber) 6px, var(--amber-soft) 6px, var(--amber-soft) 12px
+    );
+  }
+  .bar-label { text-align: center; font-size: 13px; font-weight: 500; color: var(--fg); }
+  .bar-sub { text-align: center; font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .bar-sub.bad { color: var(--coral); }
+  .bar-sub.warn { color: var(--amber); }
+
+  .donut-wrap {
+    display: grid; grid-template-columns: 160px 1fr;
+    gap: 24px; align-items: center; margin-top: 8px; padding: 0 4px;
+  }
+  .donut { width: 160px; height: 160px; position: relative; }
+  .donut svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .donut circle { fill: none; stroke-width: 18; }
+  .donut .center {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-weight: 700; font-size: 26px;
+  }
+  .donut .center .small {
+    font-size: 10px; letter-spacing: 0.1em; color: var(--muted);
+    font-weight: 600; margin-top: 4px; text-transform: uppercase;
+  }
+  .legend { display: flex; flex-direction: column; gap: 10px; }
+  .legend-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .legend-dot { width: 11px; height: 11px; border-radius: 3px; }
+  .legend-dot.healthy { background: var(--green); }
+  .legend-dot.recovering { background: var(--amber); }
+  .legend-dot.unhealthy { background: var(--coral); }
+  .legend-row .val { margin-left: auto; font-weight: 600; }
+
+  .replica-list { padding: 18px 22px 22px; border-top: 1px solid var(--border); }
+  .replica-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 12px; border-radius: 8px;
+    background: #fafaf8; margin-bottom: 8px;
+  }
+  .replica-row.unhealthy { background: var(--coral-soft); }
+  .replica-row.recovering { background: var(--amber-soft); }
+  .replica-name { font-weight: 600; font-size: 13px; min-width: 220px; }
+  .replica-meta { color: var(--muted); font-size: 12px; flex: 1; }
+  .replica-meta.bad { color: #8a2f22; }
+  .replica-meta.warn { color: #7a5a14; }
+  .replica-badge {
+    padding: 4px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 600;
+  }
+  .replica-badge.serving { background: var(--teal-soft); color: var(--slate); }
+  .replica-badge.recovering { background: var(--amber-soft); color: #7a5a14; }
+  .replica-badge.unhealthy { background: var(--coral-soft); color: #8a2f22; }
+
+  .ramp { margin-top: 6px; width: 220px; height: 4px; background: #ecebe6; border-radius: 2px; overflow: hidden; }
+  .ramp > div { height: 100%; background: var(--amber); transition: width 0.5s ease; }
+
+  .row-bottom { display: grid; grid-template-columns: 1.45fr 1fr; gap: 16px; }
+  .latency-chart { height: 130px; position: relative; margin-top: 12px; }
+  .latency-chart svg { width: 100%; height: 100%; }
+  .legend-inline {
+    display: flex; gap: 14px; font-size: 11px; color: var(--muted);
+    padding: 0 22px 8px; flex-wrap: wrap;
+  }
+  .legend-inline .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+
+  .events { padding: 6px 22px 22px; max-height: 280px; overflow-y: auto; }
+  .event-row {
+    display: flex; gap: 12px; padding: 9px 0;
+    border-bottom: 1px solid #f4f3ee; font-size: 13px; align-items: flex-start;
+  }
+  .event-row:last-child { border-bottom: none; }
+  .event-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; min-width: 60px; }
+  .event-icon {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; flex-shrink: 0;
+    background: var(--teal-soft); color: var(--slate);
+  }
+  .event-icon.warn { background: var(--amber-soft); color: #7a5a14; }
+  .event-icon.bad { background: var(--coral-soft); color: #8a2f22; }
+  .event-text { color: var(--fg); }
+  .event-text .muted { color: var(--muted); font-size: 12px; display: block; margin-top: 1px; }
+
+  .footer-line {
+    display: flex; gap: 12px; color: var(--muted); font-size: 12px;
+    margin-top: 18px; padding: 12px 14px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); align-items: center; flex-wrap: wrap;
+  }
+  .footer-line code {
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 12px; background: #fafaf8; padding: 2px 6px; border-radius: 4px;
+    border: 1px solid var(--border); color: var(--slate);
+  }
+
+  @media (max-width: 980px) {
+    .hero { grid-template-columns: repeat(2, 1fr); }
+    .row, .row-bottom { grid-template-columns: 1fr; }
+    .donut-wrap { grid-template-columns: 1fr; justify-items: center; }
+  }
 </style>
 </head>
 <body>
-<h1>BalanceAI · Load Distribution</h1>
-<div class="subtitle" id="subtitle">Loading pool snapshot…</div>
+<div class="container">
 
-<div class="controls">
-  <label for="agent-select">Agent:</label>
-  <select id="agent-select"></select>
-  <label for="strategy-select">Strategy:</label>
-  <select id="strategy-select">
-    <option value="round_robin">round_robin</option>
-    <option value="random">random</option>
-    <option value="least_connections">least_connections</option>
-    <option value="p2c">p2c</option>
-    <option value="chwbl">chwbl</option>
-  </select>
-  <button id="refresh-btn">Refresh</button>
-</div>
-
-<div class="hero">
-  <div class="card"><h3>Total replicas</h3><div class="big" id="m-total">—</div></div>
-  <div class="card"><h3>Healthy</h3><div class="big good" id="m-healthy">—</div></div>
-  <div class="card"><h3>Active strategy</h3><div class="big" id="m-strategy">—</div></div>
-  <div class="card"><h3>Fairness Gini</h3><div class="big" id="m-gini">—</div>
-    <div class="subtitle" style="margin:0;font-size:11px">lower is better; &lt; 0.10 is balanced</div>
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <span>Nasiko</span>
+      <div class="nav" style="margin-left:36px;">
+        <a href="#">Agents</a>
+        <a href="#">Router</a>
+        <a href="#" class="active">Load Distribution</a>
+        <a href="#">Phoenix</a>
+        <a href="#">Settings</a>
+      </div>
+    </div>
+    <div class="right">
+      <span><span class="live-dot"></span>Live</span>
+      <span>admin</span>
+    </div>
   </div>
-</div>
 
-<div class="grid">
-  <div class="card">
-    <h3 style="margin-bottom:12px">Inflight requests per replica</h3>
-    <div class="bars" id="bars"></div>
+  <div class="filters">
+    <div class="filter">
+      <span class="filter-label">Agent:</span>
+      <select id="agent-select"><option>—</option></select>
+    </div>
+    <div class="filter">
+      <span class="filter-label">Strategy:</span>
+      <select id="strategy-select">
+        <option value="round_robin">Round-Robin</option>
+        <option value="random">Random</option>
+        <option value="least_connections">Least-Connections</option>
+        <option value="p2c">Power-of-Two-Choices</option>
+        <option value="chwbl">CHWBL (session affinity)</option>
+      </select>
+    </div>
+    <div class="filter">
+      <span class="filter-label">Window:</span>
+      <select disabled><option>Last 60s</option></select>
+    </div>
+    <div class="badge" id="health-badge"><span class="dot"></span><span id="health-text">- of - healthy</span></div>
   </div>
-  <div class="card">
-    <h3 style="margin-bottom:12px">Lifecycle events</h3>
-    <div class="events" id="events"><div class="event">Waiting for events…</div></div>
+
+  <div class="hero">
+    <div class="stat-card">
+      <div class="stat-label">Total Requests</div>
+      <div class="stat-value" id="stat-total">0</div>
+      <div class="stat-sub good" id="stat-total-sub">no traffic yet</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">P99 Latency</div>
+      <div class="stat-value" id="stat-p99">—</div>
+      <div class="stat-sub" id="stat-p99-sub">EWMA across pool</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Healthy Replicas</div>
+      <div class="stat-value" id="stat-healthy">0 / 0</div>
+      <div class="stat-sub" id="stat-healthy-sub">all serving traffic</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Strategy</div>
+      <div class="stat-value" id="stat-strategy" style="font-size: 22px; padding-top: 6px;">—</div>
+      <div class="stat-sub">switchable live</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Requests per Instance</div>
+        <div class="panel-sub">last 60s</div>
+      </div>
+      <div class="panel-body">
+        <div class="bars" id="bars"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Pool Health</div>
+      </div>
+      <div class="panel-body">
+        <div class="donut-wrap">
+          <div class="donut">
+            <svg viewBox="0 0 36 36">
+              <circle cx="18" cy="18" r="15.915" stroke="#f2f1ed" />
+              <circle cx="18" cy="18" r="15.915" id="donut-healthy" stroke="#6cb087" stroke-dasharray="0 100" />
+              <circle cx="18" cy="18" r="15.915" id="donut-recovering" stroke="#d8a44a" stroke-dasharray="0 100" stroke-dashoffset="0" />
+              <circle cx="18" cy="18" r="15.915" id="donut-unhealthy" stroke="#e87a6c" stroke-dasharray="0 100" stroke-dashoffset="0" />
+            </svg>
+            <div class="center"><span id="donut-text">0/0</span><span class="small" id="donut-state">healthy</span></div>
+          </div>
+          <div class="legend">
+            <div class="legend-row"><span class="legend-dot healthy"></span>Healthy<span class="val" id="leg-healthy">0</span></div>
+            <div class="legend-row"><span class="legend-dot recovering"></span>Recovering<span class="val" id="leg-recovering">0</span></div>
+            <div class="legend-row"><span class="legend-dot unhealthy"></span>Unhealthy<span class="val" id="leg-unhealthy">0</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="replica-list" id="replica-list"></div>
+    </div>
+  </div>
+
+  <div class="row-bottom">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">EWMA Latency by Instance</div>
+        <div class="panel-sub">live</div>
+      </div>
+      <div class="legend-inline" id="latency-legend"></div>
+      <div class="latency-chart"><svg id="latency-svg" viewBox="0 0 600 130" preserveAspectRatio="none"></svg></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Recent Events</div>
+        <div class="panel-sub" id="event-count">0</div>
+      </div>
+      <div class="events" id="events"></div>
+    </div>
+  </div>
+
+  <div class="footer-line">
+    <strong>API:</strong>
+    <code>GET /balancer/pools</code>
+    <code>GET /balancer/pool/{name}</code>
+    <code>PUT /balancer/strategy/{name}</code>
+    <code>GET /balancer/events</code> (SSE)
+    <code>GET /balancer/metrics</code> (Prometheus)
   </div>
 </div>
 
 <script>
-  const API = location.origin || "http://localhost:8081";
-  const $ = (id) => document.getElementById(id);
+'use strict';
 
-  let currentAgent = null;
-  let sse = null;
+const SERIES_COLORS = ["#5aa9a5", "#e87a6c", "#d8a44a", "#6cb087", "#7c83fd", "#aa5dac"];
+const latencyHistory = {};
+const HISTORY_MAX = 60;
+const RENDER_W = 600;
+const RENDER_H = 130;
 
-  async function loadPools() {
-    try {
-      const r = await fetch(`${API}/balancer/pools`);
-      const data = await r.json();
-      const names = data.pools.map(p => p.agent_name);
-      const sel = $("agent-select");
-      const prev = sel.value;
-      sel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join("");
-      if (names.length === 0) {
-        $("subtitle").textContent = "No agent pools registered. Scale an agent and refresh.";
-        return null;
-      }
-      if (prev && names.includes(prev)) sel.value = prev;
-      currentAgent = sel.value;
-      return data;
-    } catch (e) {
-      $("subtitle").textContent = `Cannot reach balancer API (${e.message}). Is the router running on :8081?`;
-      return null;
+let currentAgent = null;
+
+async function fetchJson(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(url + ' -> ' + r.status);
+  return r.json();
+}
+
+async function loadAgentList() {
+  const data = await fetchJson('/balancer/pools');
+  const pools = data.pools || [];
+  const select = document.getElementById('agent-select');
+  const have = new Set(Array.from(select.options).map(o => o.value));
+  pools.forEach(p => {
+    if (!have.has(p.agent_name)) {
+      const o = document.createElement('option');
+      o.value = p.agent_name; o.textContent = p.agent_name;
+      select.appendChild(o);
     }
-  }
-
-  async function loadPool(agent) {
-    if (!agent) return;
-    try {
-      const r = await fetch(`${API}/balancer/pool/${agent}`);
-      if (!r.ok) { $("subtitle").textContent = `Pool ${agent} not found`; return; }
-      const data = await r.json();
-      render(data);
-    } catch (e) {
-      $("subtitle").textContent = `Pool fetch failed: ${e.message}`;
-    }
-  }
-
-  function render(pool) {
-    $("subtitle").textContent = `Pool: ${pool.agent_name} · ${pool.replicas.length} replicas`;
-    const serving = pool.replicas.filter(r => r.status === "serving").length;
-    $("m-total").textContent = pool.replicas.length;
-    $("m-healthy").textContent = `${serving} / ${pool.replicas.length}`;
-    $("m-strategy").textContent = pool.strategy;
-    $("strategy-select").value = pool.strategy;
-
-    const counts = pool.replicas.map(r => r.inflight);
-    $("m-gini").textContent = gini(counts).toFixed(3);
-
-    const maxInflight = Math.max(1, ...counts);
-    $("bars").innerHTML = pool.replicas.map(r => {
-      const pct = (r.inflight / maxInflight) * 100;
-      return `
-        <div class="bar-row">
-          <div class="bar-label">${r.container_name}
-            <span class="status-pill ${r.status}">${r.status}</span></div>
-          <div class="bar-track"><div class="bar-fill ${r.status}" style="width: ${pct}%"></div></div>
-          <div class="bar-value">${r.inflight} inflight · ${(r.ewma_latency_ms || 0).toFixed(0)}ms</div>
-        </div>
-      `;
-    }).join("");
-  }
-
-  function gini(values) {
-    if (!values.length) return 0;
-    const s = values.reduce((a, b) => a + b, 0);
-    if (s === 0) return 0;
-    let diffs = 0;
-    for (const a of values) for (const b of values) diffs += Math.abs(a - b);
-    return diffs / (2 * values.length * values.length * (s / values.length));
-  }
-
-  // Debounce loadPool refreshes from the SSE stream. A docker compose
-  // --scale to 10 fires 10 replica_added events in a burst; without
-  // debouncing that's 10 sequential /balancer/pool fetches which can
-  // pin the router right when the demo is supposed to look smooth.
-  let _refreshTimer = null;
-  function scheduleRefresh() {
-    if (_refreshTimer !== null) return;
-    _refreshTimer = setTimeout(() => {
-      _refreshTimer = null;
-      loadPool(currentAgent);
-    }, 500);
-  }
-
-  function startEventStream() {
-    if (sse) sse.close();
-    sse = new EventSource(`${API}/balancer/events`);
-    sse.onmessage = (e) => {
-      try {
-        const ev = JSON.parse(e.data);
-        const div = document.createElement("div");
-        div.className = "event";
-        div.innerHTML = `<span class="ts">${new Date().toLocaleTimeString()}</span>
-                         <span class="type">${ev.type}</span>
-                         ${ev.pool}/${ev.instance_id}`;
-        const ec = $("events");
-        if (ec.firstChild && ec.firstChild.textContent === "Waiting for events…") ec.innerHTML = "";
-        ec.insertBefore(div, ec.firstChild);
-        while (ec.children.length > 50) ec.removeChild(ec.lastChild);
-        // Refresh pool on lifecycle change, coalescing bursts of events.
-        scheduleRefresh();
-      } catch (_) {}
-    };
-    sse.onerror = () => { /* will reconnect automatically */ };
-  }
-
-  $("agent-select").addEventListener("change", (e) => {
-    currentAgent = e.target.value;
-    loadPool(currentAgent);
   });
+  if (select.options.length > 1 && select.options[0].textContent === '—') select.remove(0);
+  if (currentAgent === null && pools.length > 0) {
+    currentAgent = pools[0].agent_name;
+    select.value = currentAgent;
+  }
+  return pools;
+}
 
-  $("strategy-select").addEventListener("change", async (e) => {
-    const strategy = e.target.value;
-    await fetch(`${API}/balancer/strategy/${currentAgent}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ strategy }),
+function statusKey(s) {
+  if (s === 'serving') return 'serving';
+  if (s === 'draining' || s === 'terminated') return 'unhealthy';
+  if (s === 'ready' || s === 'discovered') return 'recovering';
+  return 'serving';
+}
+
+function renderHero(pool, replicas) {
+  const sumReq = replicas.reduce((a, r) => a + (r.requests_60s || 0), 0);
+  document.getElementById('stat-total').textContent = sumReq.toLocaleString();
+  document.getElementById('stat-total-sub').textContent = sumReq > 0 ? 'last 60s' : 'no traffic yet';
+
+  const latencies = replicas.filter(r => statusKey(r.status) === 'serving')
+    .map(r => r.ewma_latency_ms || 0);
+  const p99 = latencies.length > 0 ? Math.max(...latencies) : 0;
+  document.getElementById('stat-p99').textContent = p99 > 0 ? Math.round(p99) + ' ms' : '—';
+
+  const counts = { serving: 0, recovering: 0, unhealthy: 0 };
+  replicas.forEach(r => { counts[statusKey(r.status)]++; });
+  const total = replicas.length;
+  const healthyEl = document.getElementById('stat-healthy');
+  healthyEl.textContent = counts.serving + ' / ' + total;
+  healthyEl.classList.remove('warn', 'bad');
+  if (counts.serving < total && counts.unhealthy > 0) healthyEl.classList.add('bad');
+  else if (counts.recovering > 0) healthyEl.classList.add('warn');
+
+  const subHealthy = document.getElementById('stat-healthy-sub');
+  if (counts.unhealthy > 0) { subHealthy.textContent = counts.unhealthy + ' unhealthy'; subHealthy.className = 'stat-sub bad'; }
+  else if (counts.recovering > 0) { subHealthy.textContent = counts.recovering + ' recovering'; subHealthy.className = 'stat-sub warn'; }
+  else { subHealthy.textContent = 'all serving traffic'; subHealthy.className = 'stat-sub good'; }
+
+  const strategyMap = {
+    round_robin: 'Round-Robin', random: 'Random',
+    least_connections: 'Least-Connections', p2c: 'Power-of-Two-Choices', chwbl: 'CHWBL',
+  };
+  document.getElementById('stat-strategy').textContent =
+    strategyMap[pool.strategy] || pool.strategy || '—';
+
+  const badge = document.getElementById('health-badge');
+  const badgeText = document.getElementById('health-text');
+  badge.classList.remove('warn', 'bad');
+  if (counts.unhealthy > 0) { badge.classList.add('bad'); badgeText.textContent = counts.serving + ' of ' + total + ' healthy'; }
+  else if (counts.recovering > 0) { badge.classList.add('warn'); badgeText.textContent = counts.serving + ' healthy, ' + counts.recovering + ' recovering'; }
+  else badgeText.textContent = total + ' of ' + total + ' healthy';
+}
+
+function renderBars(replicas) {
+  const wrap = document.getElementById('bars');
+  wrap.innerHTML = '';
+  if (replicas.length === 0) {
+    wrap.innerHTML = '<div style="color:var(--muted);padding:24px;">No replicas discovered yet.</div>';
+    return;
+  }
+  const maxReq = Math.max(1, ...replicas.map(r => r.requests_60s || 0));
+  replicas.forEach(r => {
+    const sk = statusKey(r.status);
+    const reqs = r.requests_60s || 0;
+    const heightPct = Math.max(2, (reqs / maxReq) * 100);
+    const col = document.createElement('div');
+    col.className = 'bar-col';
+    col.innerHTML =
+      '<div class="bar-count">' + reqs + '</div>' +
+      '<div class="bar-track"><div class="bar-fill ' + sk + '" style="height:' + heightPct + '%;"></div></div>' +
+      '<div><div class="bar-label">' + r.container_name + '</div>' +
+      '<div class="bar-sub ' + (sk === 'unhealthy' ? 'bad' : sk === 'recovering' ? 'warn' : '') + '">' + r.status + '</div></div>';
+    wrap.appendChild(col);
+  });
+}
+
+function renderDonut(replicas) {
+  const counts = { serving: 0, recovering: 0, unhealthy: 0 };
+  replicas.forEach(r => { counts[statusKey(r.status)]++; });
+  const total = replicas.length || 1;
+  const pctH = (counts.serving / total) * 100;
+  const pctR = (counts.recovering / total) * 100;
+  const pctU = (counts.unhealthy / total) * 100;
+  document.getElementById('donut-healthy').setAttribute('stroke-dasharray', pctH + ' ' + (100 - pctH));
+  document.getElementById('donut-healthy').setAttribute('stroke-dashoffset', '0');
+  document.getElementById('donut-recovering').setAttribute('stroke-dasharray', pctR + ' ' + (100 - pctR));
+  document.getElementById('donut-recovering').setAttribute('stroke-dashoffset', String(-pctH));
+  document.getElementById('donut-unhealthy').setAttribute('stroke-dasharray', pctU + ' ' + (100 - pctU));
+  document.getElementById('donut-unhealthy').setAttribute('stroke-dashoffset', String(-(pctH + pctR)));
+  document.getElementById('donut-text').textContent = counts.serving + '/' + replicas.length;
+  let state = 'healthy';
+  if (counts.unhealthy > 0) state = 'degraded';
+  else if (counts.recovering > 0) state = 'recovering';
+  document.getElementById('donut-state').textContent = state;
+  document.getElementById('leg-healthy').textContent = counts.serving;
+  document.getElementById('leg-recovering').textContent = counts.recovering;
+  document.getElementById('leg-unhealthy').textContent = counts.unhealthy;
+}
+
+function renderReplicaList(replicas) {
+  const list = document.getElementById('replica-list');
+  list.innerHTML = '';
+  replicas.forEach(r => {
+    const sk = statusKey(r.status);
+    const reqs = r.requests_60s || 0;
+    const lat = Math.round(r.ewma_latency_ms || 0);
+    const ramp = (typeof r.slow_start_weight === 'number') ? r.slow_start_weight : 1.0;
+    const rampPct = Math.round(ramp * 100);
+    const showRamp = ramp < 1.0 && sk !== 'unhealthy';
+    let meta = reqs + ' req · ' + lat + ' ms';
+    if (r.consecutive_5xx > 0) meta += ' · ' + r.consecutive_5xx + ' 5xx';
+    let metaCls = '';
+    if (sk === 'unhealthy') { meta = reqs + ' req · ' + r.status; metaCls = 'bad'; }
+    else if (showRamp) { meta = reqs + ' req · weight ' + rampPct + '%'; metaCls = 'warn'; }
+    const row = document.createElement('div');
+    row.className = 'replica-row ' + (sk === 'unhealthy' ? 'unhealthy' : sk === 'recovering' ? 'recovering' : '');
+    row.innerHTML =
+      '<div class="replica-name">' + r.container_name + '</div>' +
+      '<div class="replica-meta ' + metaCls + '">' + meta +
+      (showRamp ? '<div class="ramp"><div style="width:' + rampPct + '%"></div></div>' : '') +
+      '</div>' +
+      '<div class="replica-badge ' + sk + '">' + r.status + '</div>';
+    list.appendChild(row);
+  });
+}
+
+function updateLatencyHistory(replicas) {
+  const t = Date.now();
+  replicas.forEach(r => {
+    const arr = latencyHistory[r.container_name] || [];
+    arr.push({ t: t, v: r.ewma_latency_ms || 0 });
+    while (arr.length > HISTORY_MAX) arr.shift();
+    latencyHistory[r.container_name] = arr;
+  });
+  const liveNames = new Set(replicas.map(r => r.container_name));
+  Object.keys(latencyHistory).forEach(n => { if (!liveNames.has(n)) delete latencyHistory[n]; });
+}
+
+function renderLatencyChart(replicas) {
+  const svg = document.getElementById('latency-svg');
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const ns = 'http://www.w3.org/2000/svg';
+  let maxV = 1;
+  Object.values(latencyHistory).forEach(arr => { arr.forEach(p => { if (p.v > maxV) maxV = p.v; }); });
+  const series = replicas.map((r, i) => ({
+    name: r.container_name,
+    color: SERIES_COLORS[i % SERIES_COLORS.length],
+    data: latencyHistory[r.container_name] || [],
+  }));
+  for (let g = 0; g < 4; g++) {
+    const y = (RENDER_H * g) / 4;
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', '0'); line.setAttribute('x2', String(RENDER_W));
+    line.setAttribute('y1', String(y)); line.setAttribute('y2', String(y));
+    line.setAttribute('stroke', '#f2f1ed'); line.setAttribute('stroke-width', '1');
+    svg.appendChild(line);
+  }
+  series.forEach(s => {
+    if (s.data.length < 2) return;
+    const pts = s.data.map((p, i) => {
+      const x = (i / (HISTORY_MAX - 1)) * RENDER_W;
+      const y = RENDER_H - (p.v / maxV) * (RENDER_H - 6) - 3;
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    const poly = document.createElementNS(ns, 'polyline');
+    poly.setAttribute('points', pts);
+    poly.setAttribute('fill', 'none');
+    poly.setAttribute('stroke', s.color);
+    poly.setAttribute('stroke-width', '2');
+    poly.setAttribute('stroke-linecap', 'round');
+    poly.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(poly);
+  });
+  const leg = document.getElementById('latency-legend');
+  leg.innerHTML = series.map(s =>
+    '<span><span class="swatch" style="background:' + s.color + '"></span>' + s.name + '</span>'
+  ).join('');
+}
+
+async function tick() {
+  try {
+    const pools = await loadAgentList();
+    if (!currentAgent) return;
+    const pool = pools.find(p => p.agent_name === currentAgent) || pools[0];
+    const detail = await fetchJson('/balancer/pool/' + currentAgent);
+    const replicas = detail.replicas || [];
+    renderHero(pool || detail, replicas);
+    renderBars(replicas);
+    renderDonut(replicas);
+    renderReplicaList(replicas);
+    updateLatencyHistory(replicas);
+    renderLatencyChart(replicas);
+    const ss = document.getElementById('strategy-select');
+    if (ss.value !== detail.strategy) ss.value = detail.strategy;
+  } catch (e) {
+    console.warn('tick failed', e);
+  }
+}
+
+document.getElementById('strategy-select').addEventListener('change', async (e) => {
+  if (!currentAgent) return;
+  const strategy = e.target.value;
+  const headers = { 'Content-Type': 'application/json' };
+  const tok = window.localStorage.getItem('nasiko_token');
+  if (tok) headers['Authorization'] = 'Bearer ' + tok;
+  try {
+    await fetch('/balancer/strategy/' + currentAgent, {
+      method: 'PUT', headers, body: JSON.stringify({ strategy }),
     });
-    loadPool(currentAgent);
-  });
+  } catch (err) { console.warn('strategy swap failed', err); }
+  tick();
+});
 
-  $("refresh-btn").addEventListener("click", () => loadPool(currentAgent));
+document.getElementById('agent-select').addEventListener('change', (e) => {
+  currentAgent = e.target.value;
+  Object.keys(latencyHistory).forEach(k => delete latencyHistory[k]);
+  tick();
+});
 
-  (async () => {
-    await loadPools();
-    if (currentAgent) {
-      await loadPool(currentAgent);
-      startEventStream();
-      setInterval(() => loadPool(currentAgent), 2000);
-    }
-  })();
+function eventClass(t) {
+  if (t.indexOf('open') >= 0 || t.indexOf('failed') >= 0 || t.indexOf('terminated') >= 0 || t.indexOf('draining') >= 0) return 'bad';
+  if (t.indexOf('half_open') >= 0 || t.indexOf('slow_start') >= 0 || t.indexOf('discovered') >= 0 || t.indexOf('ready') >= 0) return 'warn';
+  return '';
+}
+function eventIcon(t) {
+  if (t.indexOf('open') >= 0 && t.indexOf('half') < 0) return '!';
+  if (t.indexOf('half_open') >= 0) return '◐';
+  if (t.indexOf('closed') >= 0) return '✓';
+  if (t.indexOf('strategy_changed') >= 0) return '↻';
+  if (t.indexOf('terminated') >= 0) return '×';
+  if (t.indexOf('draining') >= 0) return '↓';
+  if (t.indexOf('slow_start') >= 0) return '↑';
+  if (t.indexOf('added') >= 0 || t.indexOf('serving') >= 0) return '+';
+  return '·';
+}
+function appendEvent(ev) {
+  const wrap = document.getElementById('events');
+  const row = document.createElement('div');
+  row.className = 'event-row';
+  const cls = eventClass(ev.type);
+  const t = new Date((ev.ts || Date.now()/1000) * 1000);
+  const hh = String(t.getHours()).padStart(2,'0');
+  const mm = String(t.getMinutes()).padStart(2,'0');
+  const ss = String(t.getSeconds()).padStart(2,'0');
+  const txt = '<strong>' + ev.type.replace(/_/g, ' ') + '</strong>' +
+    (ev.instance_id ? ' <span class="muted">' + ev.instance_id + '</span>' : '');
+  row.innerHTML =
+    '<div class="event-time">' + hh + ':' + mm + ':' + ss + '</div>' +
+    '<div class="event-icon ' + cls + '">' + eventIcon(ev.type) + '</div>' +
+    '<div class="event-text">' + txt + '</div>';
+  wrap.insertBefore(row, wrap.firstChild);
+  while (wrap.children.length > 60) wrap.removeChild(wrap.lastChild);
+  document.getElementById('event-count').textContent = wrap.children.length;
+}
+
+function openEvents() {
+  const es = new EventSource('/balancer/events');
+  es.onmessage = (e) => { try { appendEvent(JSON.parse(e.data)); } catch (_) {} };
+  es.onerror = () => { es.close(); setTimeout(openEvents, 2000); };
+}
+
+tick();
+openEvents();
+setInterval(tick, 2000);
 </script>
 </body>
 </html>
