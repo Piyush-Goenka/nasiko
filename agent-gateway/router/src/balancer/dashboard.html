@@ -7,58 +7,86 @@
   :root {
     --bg: #f7f7f5;
     --panel: #ffffff;
+    --panel-soft: #fafaf8;
     --border: #e7e7e3;
+    --border-soft: #f0efeb;
     --fg: #1a1a1a;
     --muted: #767676;
-    --teal: #5aa9a5;
-    --teal-soft: #cfe8e6;
-    --coral: #e87a6c;
-    --coral-soft: #fbdfd9;
-    --amber: #d8a44a;
-    --amber-soft: #f6e9c8;
-    --green: #6cb087;
+    --accent: #5aa9a5;
+    --accent-soft: #cfe8e6;
+    --good: #6cb087;
+    --good-soft: #d8ecdf;
+    --bad: #e87a6c;
+    --bad-soft: #fbdfd9;
+    --warn: #d8a44a;
+    --warn-soft: #f6e9c8;
     --slate: #2a3540;
     --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04);
-    --radius: 14px;
+    --shadow-hover: 0 2px 4px rgba(0,0,0,0.05), 0 8px 28px rgba(0,0,0,0.06);
+    --radius: 12px;
   }
   * { box-sizing: border-box; }
-  html, body {
-    margin: 0; padding: 0; background: var(--bg);
-    color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "Inter", sans-serif;
-    font-size: 14px;
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--fg);
+    padding: 28px 32px 64px;
     -webkit-font-smoothing: antialiased;
+    font-size: 14px;
   }
-  .container { max-width: 1280px; margin: 0 auto; padding: 24px 28px 64px; }
+  h1 {
+    margin: 0 0 6px 0;
+    font-size: 30px; font-weight: 700;
+    letter-spacing: -0.01em;
+    background: linear-gradient(135deg, var(--slate) 0%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    display: inline-block;
+  }
+  .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 13px; }
 
-  .topbar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 0 22px;
+  .controls {
+    display: flex; gap: 10px; align-items: center;
+    margin-bottom: 20px; padding: 10px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
   }
-  .brand {
-    display: flex; align-items: center; gap: 12px;
-    font-weight: 600; font-size: 17px;
+  .controls label {
+    font-size: 12px; color: var(--muted); font-weight: 500;
   }
-  .brand-mark {
-    width: 32px; height: 32px;
-    background: linear-gradient(135deg, var(--teal) 0%, var(--coral) 100%);
-    border-radius: 8px;
+  select, button {
+    background: var(--panel-soft);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    padding: 7px 12px; border-radius: 8px;
+    font-size: 13px; font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
   }
-  .nav { display: flex; gap: 28px; }
-  .nav a {
-    color: var(--muted); text-decoration: none; font-size: 14px;
-    padding: 6px 0; position: relative;
+  select:hover, button:hover {
+    border-color: var(--accent);
+    background: var(--panel);
   }
-  .nav a.active { color: var(--fg); font-weight: 600; }
-  .nav a.active::after {
-    content: ""; position: absolute; left: 0; right: 0; bottom: -2px;
-    height: 2px; background: var(--coral); border-radius: 2px;
+  select:focus, button:focus { outline: 2px solid var(--accent-soft); outline-offset: 0; }
+  button {
+    background: var(--accent); color: white; border-color: var(--accent);
+    font-weight: 600;
   }
-  .topbar .right { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 13px; }
-  .live-dot {
-    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    background: var(--green); margin-right: 6px;
-    box-shadow: 0 0 0 0 rgba(108, 176, 135, 0.5);
+  button:hover { background: var(--slate); border-color: var(--slate); color: white; }
+
+  .live-pill {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 999px;
+    background: var(--good-soft); color: #2d5d3f;
+    font-size: 12px; font-weight: 600;
+  }
+  .live-pill .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--good);
     animation: pulse 2s infinite;
   }
   @keyframes pulse {
@@ -67,619 +95,535 @@
     100% { box-shadow: 0 0 0 0 rgba(108, 176, 135, 0); }
   }
 
-  .filters {
-    display: flex; align-items: center; gap: 12px;
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 10px 14px;
-    box-shadow: var(--shadow);
-  }
-  .filter {
-    display: flex; align-items: center; gap: 6px;
-    padding: 6px 12px; border: 1px solid var(--border);
-    border-radius: 8px; background: #fafaf8; font-size: 13px;
-  }
-  .filter-label { color: var(--muted); }
-  .filter select {
-    border: none; background: transparent; font: inherit; color: var(--fg);
-    cursor: pointer; padding: 0; outline: none; font-weight: 600;
-  }
-  .badge {
-    margin-left: auto;
-    padding: 6px 14px; border-radius: 999px;
-    background: var(--teal-soft); color: var(--slate);
-    font-size: 13px; font-weight: 600;
-    display: flex; align-items: center; gap: 6px;
-  }
-  .badge.warn { background: var(--amber-soft); color: #7a5a14; }
-  .badge.bad { background: var(--coral-soft); color: #8a2f22; }
-  .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
-  .badge.warn .dot { background: var(--amber); }
-  .badge.bad .dot { background: var(--coral); }
-
   .hero {
-    display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 16px; margin: 18px 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px; margin-bottom: 18px;
   }
-  .stat-card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 20px 22px;
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
     box-shadow: var(--shadow);
+    transition: box-shadow 0.2s ease;
   }
-  .stat-label {
-    text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--muted); font-size: 11px; font-weight: 600; margin-bottom: 12px;
+  .card:hover { box-shadow: var(--shadow-hover); }
+  .card h3 {
+    margin: 0 0 8px 0;
+    font-size: 11px; text-transform: uppercase;
+    color: var(--muted); letter-spacing: 0.06em; font-weight: 600;
   }
-  .stat-value { font-size: 36px; font-weight: 700; line-height: 1; color: var(--fg); }
-  .stat-value.warn { color: var(--amber); }
-  .stat-value.bad { color: var(--coral); }
-  .stat-sub { color: var(--muted); font-size: 12px; margin-top: 8px; }
-  .stat-sub.good { color: var(--green); }
-  .stat-sub.warn { color: var(--amber); }
-  .stat-sub.bad { color: var(--coral); }
+  .big {
+    font-size: 30px; font-weight: 700;
+    color: var(--fg);
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+  }
+  .big.good { color: var(--good); }
+  .big.bad { color: var(--bad); }
+  .big.warn { color: var(--warn); }
+  .card .hint {
+    margin-top: 6px;
+    font-size: 11px; color: var(--muted);
+  }
 
-  .row { display: grid; grid-template-columns: 1.45fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .panel {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--radius); box-shadow: var(--shadow);
+  .grid {
+    display: grid;
+    grid-template-columns: 1.7fr 1fr;
+    gap: 14px;
   }
-  .panel-header {
+  .panel-title {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 22px 8px;
+    margin: 0 0 14px 0;
   }
-  .panel-title { font-weight: 600; font-size: 15px; }
-  .panel-sub { color: var(--muted); font-size: 12px; }
-  .panel-body { padding: 14px 22px 24px; }
+  .panel-title h3 {
+    margin: 0; font-size: 13px; font-weight: 600;
+    color: var(--slate);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .panel-title .tag {
+    font-size: 11px; color: var(--muted);
+    background: var(--panel-soft); padding: 3px 8px;
+    border-radius: 6px; border: 1px solid var(--border);
+  }
 
-  .bars {
-    display: flex; align-items: flex-end; gap: 18px;
-    height: 220px; padding: 16px 8px 0;
+  /* Bars */
+  .bars { display: flex; flex-direction: column; gap: 12px; }
+  .bar-row {
+    display: grid;
+    grid-template-columns: 220px 1fr 150px;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--panel-soft);
+    border: 1px solid var(--border-soft);
+    transition: background 0.2s ease;
   }
-  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-  .bar-count { font-size: 15px; font-weight: 600; color: var(--fg); }
+  .bar-row:hover { background: #f4f3ef; }
+  .bar-row.recovering { background: var(--warn-soft); border-color: #ebd9a9; }
+  .bar-row.ejected { background: var(--bad-soft); border-color: #f4cabf; }
+  .bar-label {
+    font-family: "SF Mono", ui-monospace, monospace;
+    font-size: 12px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .bar-label .name { font-weight: 600; color: var(--fg); }
   .bar-track {
-    width: 100%; max-width: 110px; flex: 1; min-height: 6px;
-    background: #f2f1ed; border-radius: 8px 8px 0 0;
-    display: flex; align-items: flex-end; overflow: hidden;
+    background: #ecebe6;
+    border-radius: 6px;
+    height: 26px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
   }
   .bar-fill {
-    width: 100%; background: var(--teal);
-    border-radius: 8px 8px 0 0;
-    transition: height 0.45s cubic-bezier(.4,0,.2,1);
+    background: linear-gradient(90deg, var(--accent) 0%, #74bbb6 100%);
+    height: 100%;
+    transition: width 0.5s cubic-bezier(.4,0,.2,1);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding-right: 8px;
+    color: white; font-size: 11px; font-weight: 600;
   }
-  .bar-fill.unhealthy {
+  .bar-fill.serving { background: linear-gradient(90deg, var(--good) 0%, #88c4a1 100%); }
+  .bar-fill.ejected,
+  .bar-fill.draining,
+  .bar-fill.terminated {
     background: repeating-linear-gradient(
-      135deg, var(--coral) 0px, var(--coral) 6px, var(--coral-soft) 6px, var(--coral-soft) 12px
-    );
+      135deg, var(--bad) 0px, var(--bad) 6px, var(--bad-soft) 6px, var(--bad-soft) 12px);
   }
-  .bar-fill.recovering {
+  .bar-fill.discovered, .bar-fill.ready {
     background: repeating-linear-gradient(
-      135deg, var(--amber) 0px, var(--amber) 6px, var(--amber-soft) 6px, var(--amber-soft) 12px
-    );
+      135deg, var(--warn) 0px, var(--warn) 6px, var(--warn-soft) 6px, var(--warn-soft) 12px);
   }
-  .bar-label { text-align: center; font-size: 13px; font-weight: 500; color: var(--fg); }
-  .bar-sub { text-align: center; font-size: 11px; color: var(--muted); margin-top: 2px; }
-  .bar-sub.bad { color: var(--coral); }
-  .bar-sub.warn { color: var(--amber); }
+  .bar-value {
+    text-align: right;
+    font-family: "SF Mono", ui-monospace, monospace;
+    font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .bar-value .strong { color: var(--fg); font-weight: 600; }
+  .ramp {
+    margin-top: 4px;
+    height: 3px; width: 100%;
+    background: #ecebe6;
+    border-radius: 2px; overflow: hidden;
+  }
+  .ramp > div {
+    height: 100%; background: var(--warn);
+    transition: width 0.5s ease;
+  }
 
-  .donut-wrap {
-    display: grid; grid-template-columns: 160px 1fr;
-    gap: 24px; align-items: center; margin-top: 8px; padding: 0 4px;
+  /* Status pills */
+  .status-pill {
+    display: inline-block;
+    padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
-  .donut { width: 160px; height: 160px; position: relative; }
-  .donut svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-  .donut circle { fill: none; stroke-width: 18; }
-  .donut .center {
-    position: absolute; inset: 0; display: flex; flex-direction: column;
+  .status-pill.serving { background: var(--good-soft); color: #2d5d3f; }
+  .status-pill.discovered, .status-pill.ready { background: var(--warn-soft); color: #7a5a14; }
+  .status-pill.ejected, .status-pill.terminated, .status-pill.draining { background: var(--bad-soft); color: #8a2f22; }
+
+  /* Donut (small inline) */
+  .donut-mini {
+    width: 70px; height: 70px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .donut-mini svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .donut-mini circle { fill: none; stroke-width: 8; }
+  .donut-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    font-weight: 700; font-size: 26px;
+    font-weight: 700; font-size: 16px;
+    color: var(--slate);
   }
-  .donut .center .small {
-    font-size: 10px; letter-spacing: 0.1em; color: var(--muted);
-    font-weight: 600; margin-top: 4px; text-transform: uppercase;
+  .donut-center .lbl {
+    font-size: 9px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    font-weight: 600;
   }
-  .legend { display: flex; flex-direction: column; gap: 10px; }
-  .legend-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-  .legend-dot { width: 11px; height: 11px; border-radius: 3px; }
-  .legend-dot.healthy { background: var(--green); }
-  .legend-dot.recovering { background: var(--amber); }
-  .legend-dot.unhealthy { background: var(--coral); }
-  .legend-row .val { margin-left: auto; font-weight: 600; }
 
-  .replica-list { padding: 18px 22px 22px; border-top: 1px solid var(--border); }
-  .replica-row {
-    display: flex; align-items: center; gap: 14px;
-    padding: 10px 12px; border-radius: 8px;
-    background: #fafaf8; margin-bottom: 8px;
+  /* Healthy stat-card variant with donut */
+  .card-healthy {
+    display: flex; gap: 14px; align-items: center;
   }
-  .replica-row.unhealthy { background: var(--coral-soft); }
-  .replica-row.recovering { background: var(--amber-soft); }
-  .replica-name { font-weight: 600; font-size: 13px; min-width: 220px; }
-  .replica-meta { color: var(--muted); font-size: 12px; flex: 1; }
-  .replica-meta.bad { color: #8a2f22; }
-  .replica-meta.warn { color: #7a5a14; }
-  .replica-badge {
-    padding: 4px 10px; border-radius: 999px;
-    font-size: 11px; font-weight: 600;
-  }
-  .replica-badge.serving { background: var(--teal-soft); color: var(--slate); }
-  .replica-badge.recovering { background: var(--amber-soft); color: #7a5a14; }
-  .replica-badge.unhealthy { background: var(--coral-soft); color: #8a2f22; }
+  .card-healthy .content { flex: 1; }
 
-  .ramp { margin-top: 6px; width: 220px; height: 4px; background: #ecebe6; border-radius: 2px; overflow: hidden; }
-  .ramp > div { height: 100%; background: var(--amber); transition: width 0.5s ease; }
-
-  .row-bottom { display: grid; grid-template-columns: 1.45fr 1fr; gap: 16px; }
-  .latency-chart { height: 130px; position: relative; margin-top: 12px; }
-  .latency-chart svg { width: 100%; height: 100%; }
-  .legend-inline {
-    display: flex; gap: 14px; font-size: 11px; color: var(--muted);
-    padding: 0 22px 8px; flex-wrap: wrap;
+  /* Events */
+  .events {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-height: 460px; overflow-y: auto;
+    font-size: 12px;
+    box-shadow: var(--shadow);
   }
-  .legend-inline .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
-
-  .events { padding: 6px 22px 22px; max-height: 280px; overflow-y: auto; }
-  .event-row {
-    display: flex; gap: 12px; padding: 9px 0;
-    border-bottom: 1px solid #f4f3ee; font-size: 13px; align-items: flex-start;
+  .event {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-soft);
   }
-  .event-row:last-child { border-bottom: none; }
-  .event-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; min-width: 60px; }
-  .event-icon {
-    width: 22px; height: 22px; border-radius: 50%;
+  .event:last-child { border-bottom: none; }
+  .event .ts {
+    color: var(--muted);
+    font-family: "SF Mono", ui-monospace, monospace;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    min-width: 60px;
+  }
+  .event .icon {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--slate);
     display: flex; align-items: center; justify-content: center;
-    font-size: 12px; flex-shrink: 0;
-    background: var(--teal-soft); color: var(--slate);
+    font-size: 11px; font-weight: 600; flex-shrink: 0;
   }
-  .event-icon.warn { background: var(--amber-soft); color: #7a5a14; }
-  .event-icon.bad { background: var(--coral-soft); color: #8a2f22; }
-  .event-text { color: var(--fg); }
-  .event-text .muted { color: var(--muted); font-size: 12px; display: block; margin-top: 1px; }
-
-  .footer-line {
-    display: flex; gap: 12px; color: var(--muted); font-size: 12px;
-    margin-top: 18px; padding: 12px 14px;
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--radius); align-items: center; flex-wrap: wrap;
+  .event.warn .icon { background: var(--warn-soft); color: #7a5a14; }
+  .event.bad .icon { background: var(--bad-soft); color: #8a2f22; }
+  .event .body { flex: 1; }
+  .event .type {
+    font-weight: 600; color: var(--slate);
+    text-transform: lowercase;
   }
-  .footer-line code {
-    font-family: "SF Mono", "Menlo", monospace;
-    font-size: 12px; background: #fafaf8; padding: 2px 6px; border-radius: 4px;
-    border: 1px solid var(--border); color: var(--slate);
+  .event .meta {
+    font-family: "SF Mono", ui-monospace, monospace;
+    font-size: 11px; color: var(--muted); margin-top: 2px;
+  }
+  .event-placeholder {
+    padding: 16px; color: var(--muted); text-align: center; font-style: italic;
   }
 
-  @media (max-width: 980px) {
-    .hero { grid-template-columns: repeat(2, 1fr); }
-    .row, .row-bottom { grid-template-columns: 1fr; }
-    .donut-wrap { grid-template-columns: 1fr; justify-items: center; }
+  .footer {
+    margin-top: 24px;
+    padding: 14px 18px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    font-size: 11px; color: var(--muted);
+    box-shadow: var(--shadow);
+  }
+  .footer code {
+    font-family: "SF Mono", ui-monospace, monospace;
+    font-size: 11px;
+    background: var(--panel-soft); padding: 2px 7px;
+    border-radius: 4px; border: 1px solid var(--border);
+    color: var(--slate);
+  }
+
+  @media (max-width: 800px) {
+    .grid { grid-template-columns: 1fr; }
+    .bar-row { grid-template-columns: 1fr; }
   }
 </style>
 </head>
 <body>
-<div class="container">
 
-  <div class="topbar">
-    <div class="brand">
-      <div class="brand-mark"></div>
-      <span>Nasiko</span>
-      <div class="nav" style="margin-left:36px;">
-        <a href="#">Agents</a>
-        <a href="#">Router</a>
-        <a href="#" class="active">Load Distribution</a>
-        <a href="#">Phoenix</a>
-        <a href="#">Settings</a>
-      </div>
+<h1>BalanceAI · Load Distribution</h1>
+<div class="subtitle" id="subtitle">Loading pool snapshot…</div>
+
+<div class="controls">
+  <label for="agent-select">Agent</label>
+  <select id="agent-select"></select>
+  <label for="strategy-select" style="margin-left:8px;">Strategy</label>
+  <select id="strategy-select">
+    <option value="round_robin">Round-Robin</option>
+    <option value="random">Random</option>
+    <option value="least_connections">Least-Connections</option>
+    <option value="p2c">Power-of-Two-Choices</option>
+    <option value="chwbl">CHWBL</option>
+  </select>
+  <button id="refresh-btn">Refresh</button>
+  <span class="live-pill"><span class="dot"></span>Live</span>
+</div>
+
+<div class="hero">
+  <div class="card">
+    <h3>Total replicas</h3>
+    <div class="big" id="m-total">—</div>
+    <div class="hint" id="m-total-sub">across the pool</div>
+  </div>
+
+  <div class="card card-healthy">
+    <div class="donut-mini">
+      <svg viewBox="0 0 36 36">
+        <circle cx="18" cy="18" r="15.915" stroke="#f2f1ed" />
+        <circle cx="18" cy="18" r="15.915" id="donut-good" stroke="#6cb087" stroke-dasharray="0 100" />
+        <circle cx="18" cy="18" r="15.915" id="donut-warn" stroke="#d8a44a" stroke-dasharray="0 100" stroke-dashoffset="0" />
+        <circle cx="18" cy="18" r="15.915" id="donut-bad"  stroke="#e87a6c" stroke-dasharray="0 100" stroke-dashoffset="0" />
+      </svg>
+      <div class="donut-center"><span id="donut-text">—</span><span class="lbl" id="donut-lbl">healthy</span></div>
     </div>
-    <div class="right">
-      <span><span class="live-dot"></span>Live</span>
-      <span>admin</span>
+    <div class="content">
+      <h3>Healthy</h3>
+      <div class="big good" id="m-healthy">—</div>
+      <div class="hint" id="m-healthy-sub">all serving traffic</div>
     </div>
   </div>
 
-  <div class="filters">
-    <div class="filter">
-      <span class="filter-label">Agent:</span>
-      <select id="agent-select"><option>—</option></select>
-    </div>
-    <div class="filter">
-      <span class="filter-label">Strategy:</span>
-      <select id="strategy-select">
-        <option value="round_robin">Round-Robin</option>
-        <option value="random">Random</option>
-        <option value="least_connections">Least-Connections</option>
-        <option value="p2c">Power-of-Two-Choices</option>
-        <option value="chwbl">CHWBL (session affinity)</option>
-      </select>
-    </div>
-    <div class="filter">
-      <span class="filter-label">Window:</span>
-      <select disabled><option>Last 60s</option></select>
-    </div>
-    <div class="badge" id="health-badge"><span class="dot"></span><span id="health-text">- of - healthy</span></div>
+  <div class="card">
+    <h3>Active strategy</h3>
+    <div class="big" id="m-strategy" style="font-size:22px;line-height:1.4;">—</div>
+    <div class="hint">switch live ↑</div>
   </div>
 
-  <div class="hero">
-    <div class="stat-card">
-      <div class="stat-label">Total Requests</div>
-      <div class="stat-value" id="stat-total">0</div>
-      <div class="stat-sub good" id="stat-total-sub">no traffic yet</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">P99 Latency</div>
-      <div class="stat-value" id="stat-p99">—</div>
-      <div class="stat-sub" id="stat-p99-sub">EWMA across pool</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Healthy Replicas</div>
-      <div class="stat-value" id="stat-healthy">0 / 0</div>
-      <div class="stat-sub" id="stat-healthy-sub">all serving traffic</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Strategy</div>
-      <div class="stat-value" id="stat-strategy" style="font-size: 22px; padding-top: 6px;">—</div>
-      <div class="stat-sub">switchable live</div>
-    </div>
-  </div>
-
-  <div class="row">
-    <div class="panel">
-      <div class="panel-header">
-        <div class="panel-title">Requests per Instance</div>
-        <div class="panel-sub">last 60s</div>
-      </div>
-      <div class="panel-body">
-        <div class="bars" id="bars"></div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header">
-        <div class="panel-title">Pool Health</div>
-      </div>
-      <div class="panel-body">
-        <div class="donut-wrap">
-          <div class="donut">
-            <svg viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="15.915" stroke="#f2f1ed" />
-              <circle cx="18" cy="18" r="15.915" id="donut-healthy" stroke="#6cb087" stroke-dasharray="0 100" />
-              <circle cx="18" cy="18" r="15.915" id="donut-recovering" stroke="#d8a44a" stroke-dasharray="0 100" stroke-dashoffset="0" />
-              <circle cx="18" cy="18" r="15.915" id="donut-unhealthy" stroke="#e87a6c" stroke-dasharray="0 100" stroke-dashoffset="0" />
-            </svg>
-            <div class="center"><span id="donut-text">0/0</span><span class="small" id="donut-state">healthy</span></div>
-          </div>
-          <div class="legend">
-            <div class="legend-row"><span class="legend-dot healthy"></span>Healthy<span class="val" id="leg-healthy">0</span></div>
-            <div class="legend-row"><span class="legend-dot recovering"></span>Recovering<span class="val" id="leg-recovering">0</span></div>
-            <div class="legend-row"><span class="legend-dot unhealthy"></span>Unhealthy<span class="val" id="leg-unhealthy">0</span></div>
-          </div>
-        </div>
-      </div>
-      <div class="replica-list" id="replica-list"></div>
-    </div>
-  </div>
-
-  <div class="row-bottom">
-    <div class="panel">
-      <div class="panel-header">
-        <div class="panel-title">EWMA Latency by Instance</div>
-        <div class="panel-sub">live</div>
-      </div>
-      <div class="legend-inline" id="latency-legend"></div>
-      <div class="latency-chart"><svg id="latency-svg" viewBox="0 0 600 130" preserveAspectRatio="none"></svg></div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header">
-        <div class="panel-title">Recent Events</div>
-        <div class="panel-sub" id="event-count">0</div>
-      </div>
-      <div class="events" id="events"></div>
-    </div>
-  </div>
-
-  <div class="footer-line">
-    <strong>API:</strong>
-    <code>GET /balancer/pools</code>
-    <code>GET /balancer/pool/{name}</code>
-    <code>PUT /balancer/strategy/{name}</code>
-    <code>GET /balancer/events</code> (SSE)
-    <code>GET /balancer/metrics</code> (Prometheus)
+  <div class="card">
+    <h3>Fairness Gini</h3>
+    <div class="big" id="m-gini">—</div>
+    <div class="hint">lower is better · &lt; 0.10 is balanced</div>
   </div>
 </div>
 
+<div class="grid">
+  <div class="card">
+    <div class="panel-title">
+      <h3>Requests per replica</h3>
+      <span class="tag" id="bars-tag">last 60s</span>
+    </div>
+    <div class="bars" id="bars"></div>
+  </div>
+
+  <div>
+    <div class="panel-title" style="margin-bottom:8px;">
+      <h3>Lifecycle events</h3>
+      <span class="tag" id="event-count">0</span>
+    </div>
+    <div class="events" id="events">
+      <div class="event-placeholder">Waiting for events…</div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <strong>API:</strong>
+  <code>GET /balancer/pools</code>
+  <code>GET /balancer/pool/{name}</code>
+  <code>PUT /balancer/strategy/{name}</code>
+  <code>GET /balancer/events</code> (SSE)
+  <code>GET /balancer/metrics</code> (Prometheus)
+</div>
+
 <script>
-'use strict';
+  const API = location.origin;
+  const $ = (id) => document.getElementById(id);
+  let currentAgent = null;
+  let sse = null;
 
-const SERIES_COLORS = ["#5aa9a5", "#e87a6c", "#d8a44a", "#6cb087", "#7c83fd", "#aa5dac"];
-const latencyHistory = {};
-const HISTORY_MAX = 60;
-const RENDER_W = 600;
-const RENDER_H = 130;
-
-let currentAgent = null;
-
-async function fetchJson(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(url + ' -> ' + r.status);
-  return r.json();
-}
-
-async function loadAgentList() {
-  const data = await fetchJson('/balancer/pools');
-  const pools = data.pools || [];
-  const select = document.getElementById('agent-select');
-  const have = new Set(Array.from(select.options).map(o => o.value));
-  pools.forEach(p => {
-    if (!have.has(p.agent_name)) {
-      const o = document.createElement('option');
-      o.value = p.agent_name; o.textContent = p.agent_name;
-      select.appendChild(o);
+  async function loadPools() {
+    try {
+      const r = await fetch(API + '/balancer/pools');
+      const data = await r.json();
+      const names = data.pools.map(p => p.agent_name);
+      const sel = $('agent-select');
+      const prev = sel.value;
+      sel.innerHTML = names.map(n => '<option value="' + n + '">' + n + '</option>').join('');
+      if (names.length === 0) {
+        $('subtitle').textContent = 'No agent pools registered. Scale an agent and refresh.';
+        return null;
+      }
+      if (prev && names.includes(prev)) sel.value = prev;
+      currentAgent = sel.value;
+      return data;
+    } catch (e) {
+      $('subtitle').textContent = 'Cannot reach balancer API (' + e.message + ').';
+      return null;
     }
-  });
-  if (select.options.length > 1 && select.options[0].textContent === '—') select.remove(0);
-  if (currentAgent === null && pools.length > 0) {
-    currentAgent = pools[0].agent_name;
-    select.value = currentAgent;
   }
-  return pools;
-}
 
-function statusKey(s) {
-  if (s === 'serving') return 'serving';
-  if (s === 'draining' || s === 'terminated') return 'unhealthy';
-  if (s === 'ready' || s === 'discovered') return 'recovering';
-  return 'serving';
-}
-
-function renderHero(pool, replicas) {
-  const sumReq = replicas.reduce((a, r) => a + (r.requests_60s || 0), 0);
-  document.getElementById('stat-total').textContent = sumReq.toLocaleString();
-  document.getElementById('stat-total-sub').textContent = sumReq > 0 ? 'last 60s' : 'no traffic yet';
-
-  const latencies = replicas.filter(r => statusKey(r.status) === 'serving')
-    .map(r => r.ewma_latency_ms || 0);
-  const p99 = latencies.length > 0 ? Math.max(...latencies) : 0;
-  document.getElementById('stat-p99').textContent = p99 > 0 ? Math.round(p99) + ' ms' : '—';
-
-  const counts = { serving: 0, recovering: 0, unhealthy: 0 };
-  replicas.forEach(r => { counts[statusKey(r.status)]++; });
-  const total = replicas.length;
-  const healthyEl = document.getElementById('stat-healthy');
-  healthyEl.textContent = counts.serving + ' / ' + total;
-  healthyEl.classList.remove('warn', 'bad');
-  if (counts.serving < total && counts.unhealthy > 0) healthyEl.classList.add('bad');
-  else if (counts.recovering > 0) healthyEl.classList.add('warn');
-
-  const subHealthy = document.getElementById('stat-healthy-sub');
-  if (counts.unhealthy > 0) { subHealthy.textContent = counts.unhealthy + ' unhealthy'; subHealthy.className = 'stat-sub bad'; }
-  else if (counts.recovering > 0) { subHealthy.textContent = counts.recovering + ' recovering'; subHealthy.className = 'stat-sub warn'; }
-  else { subHealthy.textContent = 'all serving traffic'; subHealthy.className = 'stat-sub good'; }
-
-  const strategyMap = {
-    round_robin: 'Round-Robin', random: 'Random',
-    least_connections: 'Least-Connections', p2c: 'Power-of-Two-Choices', chwbl: 'CHWBL',
-  };
-  document.getElementById('stat-strategy').textContent =
-    strategyMap[pool.strategy] || pool.strategy || '—';
-
-  const badge = document.getElementById('health-badge');
-  const badgeText = document.getElementById('health-text');
-  badge.classList.remove('warn', 'bad');
-  if (counts.unhealthy > 0) { badge.classList.add('bad'); badgeText.textContent = counts.serving + ' of ' + total + ' healthy'; }
-  else if (counts.recovering > 0) { badge.classList.add('warn'); badgeText.textContent = counts.serving + ' healthy, ' + counts.recovering + ' recovering'; }
-  else badgeText.textContent = total + ' of ' + total + ' healthy';
-}
-
-function renderBars(replicas) {
-  const wrap = document.getElementById('bars');
-  wrap.innerHTML = '';
-  if (replicas.length === 0) {
-    wrap.innerHTML = '<div style="color:var(--muted);padding:24px;">No replicas discovered yet.</div>';
-    return;
+  async function loadPool(agent) {
+    if (!agent) return;
+    try {
+      const r = await fetch(API + '/balancer/pool/' + agent);
+      if (!r.ok) { $('subtitle').textContent = 'Pool ' + agent + ' not found'; return; }
+      render(await r.json());
+    } catch (e) {
+      $('subtitle').textContent = 'Pool fetch failed: ' + e.message;
+    }
   }
-  const maxReq = Math.max(1, ...replicas.map(r => r.requests_60s || 0));
-  replicas.forEach(r => {
-    const sk = statusKey(r.status);
-    const reqs = r.requests_60s || 0;
-    const heightPct = Math.max(2, (reqs / maxReq) * 100);
-    const col = document.createElement('div');
-    col.className = 'bar-col';
-    col.innerHTML =
-      '<div class="bar-count">' + reqs + '</div>' +
-      '<div class="bar-track"><div class="bar-fill ' + sk + '" style="height:' + heightPct + '%;"></div></div>' +
-      '<div><div class="bar-label">' + r.container_name + '</div>' +
-      '<div class="bar-sub ' + (sk === 'unhealthy' ? 'bad' : sk === 'recovering' ? 'warn' : '') + '">' + r.status + '</div></div>';
-    wrap.appendChild(col);
-  });
-}
 
-function renderDonut(replicas) {
-  const counts = { serving: 0, recovering: 0, unhealthy: 0 };
-  replicas.forEach(r => { counts[statusKey(r.status)]++; });
-  const total = replicas.length || 1;
-  const pctH = (counts.serving / total) * 100;
-  const pctR = (counts.recovering / total) * 100;
-  const pctU = (counts.unhealthy / total) * 100;
-  document.getElementById('donut-healthy').setAttribute('stroke-dasharray', pctH + ' ' + (100 - pctH));
-  document.getElementById('donut-healthy').setAttribute('stroke-dashoffset', '0');
-  document.getElementById('donut-recovering').setAttribute('stroke-dasharray', pctR + ' ' + (100 - pctR));
-  document.getElementById('donut-recovering').setAttribute('stroke-dashoffset', String(-pctH));
-  document.getElementById('donut-unhealthy').setAttribute('stroke-dasharray', pctU + ' ' + (100 - pctU));
-  document.getElementById('donut-unhealthy').setAttribute('stroke-dashoffset', String(-(pctH + pctR)));
-  document.getElementById('donut-text').textContent = counts.serving + '/' + replicas.length;
-  let state = 'healthy';
-  if (counts.unhealthy > 0) state = 'degraded';
-  else if (counts.recovering > 0) state = 'recovering';
-  document.getElementById('donut-state').textContent = state;
-  document.getElementById('leg-healthy').textContent = counts.serving;
-  document.getElementById('leg-recovering').textContent = counts.recovering;
-  document.getElementById('leg-unhealthy').textContent = counts.unhealthy;
-}
-
-function renderReplicaList(replicas) {
-  const list = document.getElementById('replica-list');
-  list.innerHTML = '';
-  replicas.forEach(r => {
-    const sk = statusKey(r.status);
-    const reqs = r.requests_60s || 0;
-    const lat = Math.round(r.ewma_latency_ms || 0);
-    const ramp = (typeof r.slow_start_weight === 'number') ? r.slow_start_weight : 1.0;
-    const rampPct = Math.round(ramp * 100);
-    const showRamp = ramp < 1.0 && sk !== 'unhealthy';
-    let meta = reqs + ' req · ' + lat + ' ms';
-    if (r.consecutive_5xx > 0) meta += ' · ' + r.consecutive_5xx + ' 5xx';
-    let metaCls = '';
-    if (sk === 'unhealthy') { meta = reqs + ' req · ' + r.status; metaCls = 'bad'; }
-    else if (showRamp) { meta = reqs + ' req · weight ' + rampPct + '%'; metaCls = 'warn'; }
-    const row = document.createElement('div');
-    row.className = 'replica-row ' + (sk === 'unhealthy' ? 'unhealthy' : sk === 'recovering' ? 'recovering' : '');
-    row.innerHTML =
-      '<div class="replica-name">' + r.container_name + '</div>' +
-      '<div class="replica-meta ' + metaCls + '">' + meta +
-      (showRamp ? '<div class="ramp"><div style="width:' + rampPct + '%"></div></div>' : '') +
-      '</div>' +
-      '<div class="replica-badge ' + sk + '">' + r.status + '</div>';
-    list.appendChild(row);
-  });
-}
-
-function updateLatencyHistory(replicas) {
-  const t = Date.now();
-  replicas.forEach(r => {
-    const arr = latencyHistory[r.container_name] || [];
-    arr.push({ t: t, v: r.ewma_latency_ms || 0 });
-    while (arr.length > HISTORY_MAX) arr.shift();
-    latencyHistory[r.container_name] = arr;
-  });
-  const liveNames = new Set(replicas.map(r => r.container_name));
-  Object.keys(latencyHistory).forEach(n => { if (!liveNames.has(n)) delete latencyHistory[n]; });
-}
-
-function renderLatencyChart(replicas) {
-  const svg = document.getElementById('latency-svg');
-  while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const ns = 'http://www.w3.org/2000/svg';
-  let maxV = 1;
-  Object.values(latencyHistory).forEach(arr => { arr.forEach(p => { if (p.v > maxV) maxV = p.v; }); });
-  const series = replicas.map((r, i) => ({
-    name: r.container_name,
-    color: SERIES_COLORS[i % SERIES_COLORS.length],
-    data: latencyHistory[r.container_name] || [],
-  }));
-  for (let g = 0; g < 4; g++) {
-    const y = (RENDER_H * g) / 4;
-    const line = document.createElementNS(ns, 'line');
-    line.setAttribute('x1', '0'); line.setAttribute('x2', String(RENDER_W));
-    line.setAttribute('y1', String(y)); line.setAttribute('y2', String(y));
-    line.setAttribute('stroke', '#f2f1ed'); line.setAttribute('stroke-width', '1');
-    svg.appendChild(line);
+  function classify(status) {
+    if (status === 'serving') return 'serving';
+    if (status === 'ready' || status === 'discovered') return 'recovering';
+    return 'ejected';
   }
-  series.forEach(s => {
-    if (s.data.length < 2) return;
-    const pts = s.data.map((p, i) => {
-      const x = (i / (HISTORY_MAX - 1)) * RENDER_W;
-      const y = RENDER_H - (p.v / maxV) * (RENDER_H - 6) - 3;
-      return x.toFixed(1) + ',' + y.toFixed(1);
-    }).join(' ');
-    const poly = document.createElementNS(ns, 'polyline');
-    poly.setAttribute('points', pts);
-    poly.setAttribute('fill', 'none');
-    poly.setAttribute('stroke', s.color);
-    poly.setAttribute('stroke-width', '2');
-    poly.setAttribute('stroke-linecap', 'round');
-    poly.setAttribute('stroke-linejoin', 'round');
-    svg.appendChild(poly);
-  });
-  const leg = document.getElementById('latency-legend');
-  leg.innerHTML = series.map(s =>
-    '<span><span class="swatch" style="background:' + s.color + '"></span>' + s.name + '</span>'
-  ).join('');
-}
 
-async function tick() {
-  try {
-    const pools = await loadAgentList();
-    if (!currentAgent) return;
-    const pool = pools.find(p => p.agent_name === currentAgent) || pools[0];
-    const detail = await fetchJson('/balancer/pool/' + currentAgent);
-    const replicas = detail.replicas || [];
-    renderHero(pool || detail, replicas);
-    renderBars(replicas);
-    renderDonut(replicas);
-    renderReplicaList(replicas);
-    updateLatencyHistory(replicas);
-    renderLatencyChart(replicas);
-    const ss = document.getElementById('strategy-select');
-    if (ss.value !== detail.strategy) ss.value = detail.strategy;
-  } catch (e) {
-    console.warn('tick failed', e);
+  function render(pool) {
+    const replicas = pool.replicas || [];
+    $('subtitle').textContent = 'Pool: ' + pool.agent_name + ' · ' + replicas.length + ' replicas · strategy ' + pool.strategy;
+    $('strategy-select').value = pool.strategy;
+
+    const counts = { serving: 0, recovering: 0, ejected: 0 };
+    replicas.forEach(r => { counts[classify(r.status)]++; });
+
+    $('m-total').textContent = replicas.length;
+    $('m-total-sub').textContent = (replicas.length === 1 ? '1 replica' : replicas.length + ' replicas') + ' discovered';
+
+    const healthyEl = $('m-healthy');
+    healthyEl.textContent = counts.serving + ' / ' + replicas.length;
+    healthyEl.classList.remove('good', 'warn', 'bad');
+    if (counts.ejected > 0) healthyEl.classList.add('bad');
+    else if (counts.recovering > 0) healthyEl.classList.add('warn');
+    else healthyEl.classList.add('good');
+
+    const hsub = $('m-healthy-sub');
+    if (counts.ejected > 0) hsub.textContent = counts.ejected + ' ejected · ' + counts.serving + ' serving';
+    else if (counts.recovering > 0) hsub.textContent = counts.recovering + ' recovering';
+    else hsub.textContent = 'all serving traffic';
+
+    // Donut
+    const total = replicas.length || 1;
+    const pctG = (counts.serving / total) * 100;
+    const pctW = (counts.recovering / total) * 100;
+    const pctB = (counts.ejected / total) * 100;
+    $('donut-good').setAttribute('stroke-dasharray', pctG + ' ' + (100 - pctG));
+    $('donut-warn').setAttribute('stroke-dasharray', pctW + ' ' + (100 - pctW));
+    $('donut-warn').setAttribute('stroke-dashoffset', String(-pctG));
+    $('donut-bad').setAttribute('stroke-dasharray', pctB + ' ' + (100 - pctB));
+    $('donut-bad').setAttribute('stroke-dashoffset', String(-(pctG + pctW)));
+    $('donut-text').textContent = counts.serving + '/' + replicas.length;
+    $('donut-lbl').textContent = counts.ejected > 0 ? 'degraded' : counts.recovering > 0 ? 'recovering' : 'healthy';
+
+    // Strategy
+    const stratMap = {
+      round_robin: 'Round-Robin', random: 'Random',
+      least_connections: 'Least-Connections', p2c: 'Power-of-Two-Choices', chwbl: 'CHWBL'
+    };
+    $('m-strategy').textContent = stratMap[pool.strategy] || pool.strategy || '—';
+
+    // Gini — use rolling 60s counts when available, else inflight
+    const giniCounts = replicas.map(r => r.requests_60s || r.inflight || 0);
+    $('m-gini').textContent = gini(giniCounts).toFixed(3);
+
+    // Bars
+    const maxReq = Math.max(1, ...giniCounts);
+    $('bars').innerHTML = replicas.map(r => {
+      const cls = classify(r.status);
+      const reqs = r.requests_60s || 0;
+      const pct = Math.max(2, (reqs / maxReq) * 100);
+      const lat = Math.round(r.ewma_latency_ms || 0);
+      const ramp = (typeof r.slow_start_weight === 'number') ? r.slow_start_weight : 1.0;
+      const rampPct = Math.round(ramp * 100);
+      const showRamp = ramp < 0.999 && cls !== 'ejected';
+      return (
+        '<div class="bar-row ' + cls + '">' +
+          '<div class="bar-label">' +
+            '<span class="name">' + r.container_name + '</span>' +
+            '<span class="status-pill ' + r.status + '">' + r.status + '</span>' +
+          '</div>' +
+          '<div>' +
+            '<div class="bar-track">' +
+              '<div class="bar-fill ' + r.status + '" style="width:' + pct + '%">' +
+                (reqs > 0 ? reqs : '') +
+              '</div>' +
+            '</div>' +
+            (showRamp ? '<div class="ramp" title="slow-start ' + rampPct + '%"><div style="width:' + rampPct + '%"></div></div>' : '') +
+          '</div>' +
+          '<div class="bar-value">' +
+            '<span class="strong">' + lat + ' ms</span>' +
+            (r.inflight > 0 ? ' · ' + r.inflight + ' inflight' : '') +
+            (showRamp ? '<br><span style="color:#7a5a14">ramp ' + rampPct + '%</span>' : '') +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
   }
-}
 
-document.getElementById('strategy-select').addEventListener('change', async (e) => {
-  if (!currentAgent) return;
-  const strategy = e.target.value;
-  const headers = { 'Content-Type': 'application/json' };
-  const tok = window.localStorage.getItem('nasiko_token');
-  if (tok) headers['Authorization'] = 'Bearer ' + tok;
-  try {
-    await fetch('/balancer/strategy/' + currentAgent, {
-      method: 'PUT', headers, body: JSON.stringify({ strategy }),
-    });
-  } catch (err) { console.warn('strategy swap failed', err); }
-  tick();
-});
+  function gini(values) {
+    if (!values.length) return 0;
+    const s = values.reduce((a, b) => a + b, 0);
+    if (s === 0) return 0;
+    let diffs = 0;
+    for (const a of values) for (const b of values) diffs += Math.abs(a - b);
+    return diffs / (2 * values.length * values.length * (s / values.length));
+  }
 
-document.getElementById('agent-select').addEventListener('change', (e) => {
-  currentAgent = e.target.value;
-  Object.keys(latencyHistory).forEach(k => delete latencyHistory[k]);
-  tick();
-});
+  function eventClass(t) {
+    if (t.indexOf('open') === 0 || t === 'circuit_open' || t.indexOf('failed') >= 0 || t.indexOf('terminated') >= 0 || t.indexOf('draining') >= 0) return 'bad';
+    if (t.indexOf('half_open') >= 0 || t.indexOf('slow_start') >= 0 || t.indexOf('discovered') >= 0 || t.indexOf('ready') >= 0) return 'warn';
+    return '';
+  }
+  function eventIcon(t) {
+    if (t === 'circuit_open' || t.indexOf('failed') >= 0) return '!';
+    if (t.indexOf('half_open') >= 0) return '◐';
+    if (t.indexOf('closed') >= 0) return '✓';
+    if (t.indexOf('strategy_changed') >= 0) return '↻';
+    if (t.indexOf('terminated') >= 0) return '×';
+    if (t.indexOf('draining') >= 0) return '↓';
+    if (t.indexOf('slow_start') >= 0) return '↑';
+    if (t.indexOf('added') >= 0 || t.indexOf('serving') >= 0) return '+';
+    return '·';
+  }
 
-function eventClass(t) {
-  if (t.indexOf('open') >= 0 || t.indexOf('failed') >= 0 || t.indexOf('terminated') >= 0 || t.indexOf('draining') >= 0) return 'bad';
-  if (t.indexOf('half_open') >= 0 || t.indexOf('slow_start') >= 0 || t.indexOf('discovered') >= 0 || t.indexOf('ready') >= 0) return 'warn';
-  return '';
-}
-function eventIcon(t) {
-  if (t.indexOf('open') >= 0 && t.indexOf('half') < 0) return '!';
-  if (t.indexOf('half_open') >= 0) return '◐';
-  if (t.indexOf('closed') >= 0) return '✓';
-  if (t.indexOf('strategy_changed') >= 0) return '↻';
-  if (t.indexOf('terminated') >= 0) return '×';
-  if (t.indexOf('draining') >= 0) return '↓';
-  if (t.indexOf('slow_start') >= 0) return '↑';
-  if (t.indexOf('added') >= 0 || t.indexOf('serving') >= 0) return '+';
-  return '·';
-}
-function appendEvent(ev) {
-  const wrap = document.getElementById('events');
-  const row = document.createElement('div');
-  row.className = 'event-row';
-  const cls = eventClass(ev.type);
-  const t = new Date((ev.ts || Date.now()/1000) * 1000);
-  const hh = String(t.getHours()).padStart(2,'0');
-  const mm = String(t.getMinutes()).padStart(2,'0');
-  const ss = String(t.getSeconds()).padStart(2,'0');
-  const txt = '<strong>' + ev.type.replace(/_/g, ' ') + '</strong>' +
-    (ev.instance_id ? ' <span class="muted">' + ev.instance_id + '</span>' : '');
-  row.innerHTML =
-    '<div class="event-time">' + hh + ':' + mm + ':' + ss + '</div>' +
-    '<div class="event-icon ' + cls + '">' + eventIcon(ev.type) + '</div>' +
-    '<div class="event-text">' + txt + '</div>';
-  wrap.insertBefore(row, wrap.firstChild);
-  while (wrap.children.length > 60) wrap.removeChild(wrap.lastChild);
-  document.getElementById('event-count').textContent = wrap.children.length;
-}
+  let _refreshTimer = null;
+  function scheduleRefresh() {
+    if (_refreshTimer !== null) return;
+    _refreshTimer = setTimeout(() => {
+      _refreshTimer = null;
+      loadPool(currentAgent);
+    }, 500);
+  }
 
-function openEvents() {
-  const es = new EventSource('/balancer/events');
-  es.onmessage = (e) => { try { appendEvent(JSON.parse(e.data)); } catch (_) {} };
-  es.onerror = () => { es.close(); setTimeout(openEvents, 2000); };
-}
+  function startEventStream() {
+    if (sse) sse.close();
+    sse = new EventSource(API + '/balancer/events');
+    sse.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        const div = document.createElement('div');
+        div.className = 'event ' + eventClass(ev.type);
+        const ts = new Date().toLocaleTimeString([], { hour12: false });
+        div.innerHTML =
+          '<div class="ts">' + ts + '</div>' +
+          '<div class="icon">' + eventIcon(ev.type) + '</div>' +
+          '<div class="body">' +
+            '<div class="type">' + ev.type.replace(/_/g, ' ') + '</div>' +
+            '<div class="meta">' + (ev.instance_id || ev.pool || '') + '</div>' +
+          '</div>';
+        const ec = $('events');
+        const placeholder = ec.querySelector('.event-placeholder');
+        if (placeholder) placeholder.remove();
+        ec.insertBefore(div, ec.firstChild);
+        while (ec.children.length > 50) ec.removeChild(ec.lastChild);
+        $('event-count').textContent = ec.children.length;
+        scheduleRefresh();
+      } catch (_) {}
+    };
+    sse.onerror = () => { /* will reconnect automatically */ };
+  }
 
-tick();
-openEvents();
-setInterval(tick, 2000);
+  $('agent-select').addEventListener('change', (e) => {
+    currentAgent = e.target.value;
+    loadPool(currentAgent);
+  });
+
+  $('strategy-select').addEventListener('change', async (e) => {
+    const strategy = e.target.value;
+    const headers = { 'Content-Type': 'application/json' };
+    const tok = window.localStorage.getItem('nasiko_token');
+    if (tok) headers['Authorization'] = 'Bearer ' + tok;
+    try {
+      await fetch(API + '/balancer/strategy/' + currentAgent, {
+        method: 'PUT', headers, body: JSON.stringify({ strategy }),
+      });
+    } catch (_) {}
+    loadPool(currentAgent);
+  });
+
+  $('refresh-btn').addEventListener('click', () => loadPool(currentAgent));
+
+  (async () => {
+    await loadPools();
+    if (currentAgent) {
+      await loadPool(currentAgent);
+      startEventStream();
+      setInterval(() => loadPool(currentAgent), 2000);
+    }
+  })();
 </script>
 </body>
 </html>
