@@ -227,26 +227,49 @@
   .status-pill.discovered, .status-pill.ready { background: var(--warn-soft); color: #7a5a14; }
   .status-pill.ejected, .status-pill.terminated, .status-pill.draining { background: var(--bad-soft); color: #8a2f22; }
 
-  /* Donut (small inline) */
+  /* Donut (small inline) — CSS conic-gradient for clean smooth edges
+     instead of three stacked SVG dashed circles that produced visible
+     seams at the join points. CSS custom properties carry the cut
+     points so JS just sets percentages. */
   .donut-mini {
+    --good-end: 100%;
+    --warn-end: 100%;
     width: 70px; height: 70px;
     border-radius: 50%;
     flex-shrink: 0;
     position: relative;
+    background:
+      conic-gradient(
+        var(--good) 0,
+        var(--good) var(--good-end),
+        var(--warn) var(--good-end),
+        var(--warn) var(--warn-end),
+        var(--bad)  var(--warn-end),
+        var(--bad)  100%
+      );
+    transition: background 0.4s ease;
   }
-  .donut-mini svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-  .donut-mini circle { fill: none; stroke-width: 8; }
+  .donut-mini::after {
+    /* Inner cut-out so we see a ring instead of a pie. */
+    content: "";
+    position: absolute;
+    inset: 9px;
+    background: var(--panel);
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px var(--border-soft);
+  }
   .donut-center {
     position: absolute; inset: 0;
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    font-weight: 700; font-size: 16px;
+    font-weight: 700; font-size: 15px;
     color: var(--slate);
+    z-index: 1;
   }
   .donut-center .lbl {
-    font-size: 9px; color: var(--muted);
+    font-size: 8px; color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.05em;
-    font-weight: 600;
+    font-weight: 600; margin-top: 2px;
   }
 
   /* Healthy stat-card variant with donut */
@@ -350,13 +373,7 @@
   </div>
 
   <div class="card card-healthy">
-    <div class="donut-mini">
-      <svg viewBox="0 0 36 36">
-        <circle cx="18" cy="18" r="15.915" stroke="#f2f1ed" />
-        <circle cx="18" cy="18" r="15.915" id="donut-good" stroke="#6cb087" stroke-dasharray="0 100" />
-        <circle cx="18" cy="18" r="15.915" id="donut-warn" stroke="#d8a44a" stroke-dasharray="0 100" stroke-dashoffset="0" />
-        <circle cx="18" cy="18" r="15.915" id="donut-bad"  stroke="#e87a6c" stroke-dasharray="0 100" stroke-dashoffset="0" />
-      </svg>
+    <div class="donut-mini" id="donut-mini">
       <div class="donut-center"><span id="donut-text">—</span><span class="lbl" id="donut-lbl">healthy</span></div>
     </div>
     <div class="content">
@@ -475,16 +492,15 @@
     else if (counts.recovering > 0) hsub.textContent = counts.recovering + ' recovering';
     else hsub.textContent = 'all serving traffic';
 
-    // Donut
+    // Donut — set conic-gradient cut points via CSS custom properties.
+    // Single conic background (no stacked SVG strokes) eliminates the
+    // visible polygon seams the previous version had.
     const total = replicas.length || 1;
     const pctG = (counts.serving / total) * 100;
     const pctW = (counts.recovering / total) * 100;
-    const pctB = (counts.ejected / total) * 100;
-    $('donut-good').setAttribute('stroke-dasharray', pctG + ' ' + (100 - pctG));
-    $('donut-warn').setAttribute('stroke-dasharray', pctW + ' ' + (100 - pctW));
-    $('donut-warn').setAttribute('stroke-dashoffset', String(-pctG));
-    $('donut-bad').setAttribute('stroke-dasharray', pctB + ' ' + (100 - pctB));
-    $('donut-bad').setAttribute('stroke-dashoffset', String(-(pctG + pctW)));
+    const donut = $('donut-mini');
+    donut.style.setProperty('--good-end', pctG + '%');
+    donut.style.setProperty('--warn-end', (pctG + pctW) + '%');
     $('donut-text').textContent = counts.serving + '/' + replicas.length;
     $('donut-lbl').textContent = counts.ejected > 0 ? 'degraded' : counts.recovering > 0 ? 'recovering' : 'healthy';
 
